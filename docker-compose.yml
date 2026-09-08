@@ -1,0 +1,19 @@
+services:
+  library-portal:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: thapar-library-portal
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - DB_PATH=/app/data/library.db
+    volumes:
+      - library_storage:/app/data
+
+volumes:
+  library_storage:
+    name: thapar_library_storage

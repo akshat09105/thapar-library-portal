@@ -1,0 +1,464 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Thapar Library - Gate Simulator</title>
+  
+  <!-- Premium Font & Tailwind CSS CDN -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['"Plus Jakarta Sans"', 'sans-serif'],
+            mono: ['"Space Grotesk"', 'monospace'],
+          },
+          colors: {
+            thapar: {
+              red: '#C8102E',      // Thapar Brand Crimson Red
+              darkRed: '#a00c22',  // Darker brand red
+              redLight: '#FDF2F4', // Soft red/pink tint
+            }
+          }
+        }
+      }
+    }
+  </script>
+  
+  <style>
+    body {
+      background-color: #0F172A;
+      background-image: 
+        radial-gradient(at 0% 0%, rgba(200, 16, 46, 0.08) 0px, transparent 50%),
+        radial-gradient(at 100% 100%, rgba(30, 41, 59, 0.2) 0px, transparent 50%);
+      background-attachment: fixed;
+    }
+    
+    /* Custom Scrollbar */
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #1E293B;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: rgba(200, 16, 46, 0.3);
+      border-radius: 999px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: rgba(200, 16, 46, 0.5);
+    }
+
+    /* Laser scanner animation */
+    @keyframes scanner-laser {
+      0% { top: 0%; opacity: 0.3; }
+      50% { opacity: 1; }
+      100% { top: 100%; opacity: 0.3; }
+    }
+    .laser-line {
+      animation: scanner-laser 3s infinite linear;
+    }
+
+    /* Screen glow changes */
+    .screen-glow-idle {
+      box-shadow: 0 0 15px 2px rgba(99, 102, 241, 0.15);
+    }
+    .screen-glow-success {
+      box-shadow: 0 0 20px 4px rgba(16, 185, 129, 0.3);
+    }
+    .screen-glow-error {
+      box-shadow: 0 0 20px 4px rgba(239, 68, 68, 0.3);
+    }
+  </style>
+</head>
+<body class="text-slate-100 font-sans min-h-screen selection:bg-thapar-red/20 selection:text-thapar-red flex flex-col justify-between">
+
+  <!-- Main Container -->
+  <div class="max-w-6xl w-full mx-auto px-4 py-6 md:py-8 flex flex-col justify-between flex-grow">
+    
+    <!-- HEADER -->
+    <header class="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 pb-6 border-b border-slate-800 mb-8 bg-slate-900/60 backdrop-blur-md rounded-2xl p-4 shadow-md">
+      <div class="flex items-center gap-4">
+        <!-- Logo Image -->
+        <a href="index.html" title="Return to Portal Directory">
+          <img id="thaparLogo" src="thapar_logo.png" alt="Thapar Institute Logo" class="h-16 md:h-20 object-contain hover:opacity-85 transition-opacity" onerror="this.src='https://upload.wikimedia.org/wikipedia/en/b/bf/Thapar_Institute_of_Engineering_and_Technology_logo.png'" />
+        </a>
+        <div>
+          <div class="flex items-center gap-2">
+            <h1 class="text-lg md:text-xl font-bold font-mono tracking-tight text-white">LIBRARY GATE TURNSTILE SIMULATOR</h1>
+            <span class="text-[10px] font-bold uppercase tracking-wider bg-indigo-500/20 text-indigo-400 border border-indigo-500/30 px-2 py-0.5 rounded-full font-sans">Turnstile Mode</span>
+          </div>
+          <p class="text-xs text-slate-400">Mock Physical ID Card Sweeper: Entrance Taps, Grace Returns & Exit Vacates</p>
+        </div>
+      </div>
+      
+      <!-- Right Controls: Home Directory Link -->
+      <div>
+        <a href="index.html" class="flex items-center gap-2 bg-slate-800 border border-slate-700 hover:bg-slate-750 text-slate-200 hover:text-white px-4 py-2 rounded-xl text-xs transition-all font-semibold shadow-sm">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18" /></svg>
+          Portal Directory
+        </a>
+      </div>
+    </header>
+
+    <!-- MAIN BODY -->
+    <main class="grid grid-cols-1 lg:grid-cols-12 gap-8 items-stretch mb-8">
+      
+      <!-- LEFT COL: SIMULATOR TERMINAL SCREEN (7 COLS) -->
+      <section class="lg:col-span-7 flex flex-col justify-between">
+        
+        <div class="bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-xl flex flex-col justify-between h-full space-y-6">
+          
+          <!-- Mock Hardware Card Reader Interface -->
+          <div class="relative bg-slate-950 rounded-2xl border border-slate-800 p-6 flex flex-col justify-between items-center min-h-[350px] overflow-hidden screen-glow-idle" id="gateScreenContainer">
+            <!-- Scanline Laser Graphic -->
+            <div class="absolute inset-x-0 h-0.5 bg-gradient-to-r from-transparent via-indigo-500 to-transparent laser-line pointer-events-none" id="gateLaserLine"></div>
+            
+            <div class="w-full flex items-center justify-between text-xs text-slate-500 font-mono">
+              <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span> ONLINE</span>
+              <span>TERMINAL ID: T-GATE-01</span>
+            </div>
+
+            <!-- Central Visual Display Screen -->
+            <div class="my-auto text-center max-w-md w-full px-4 space-y-3 z-10">
+              <div id="gateVisualIndicator" class="w-16 h-16 rounded-full bg-indigo-650/20 text-indigo-400 border border-indigo-500/30 flex items-center justify-center mx-auto mb-4 animate-pulse">
+                <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z" /></svg>
+              </div>
+              <h2 id="gateDisplayTitle" class="text-xl font-bold font-mono tracking-wide text-indigo-400 uppercase">Awaiting Card Tap</h2>
+              <p id="gateDisplayDesc" class="text-xs text-slate-400 font-medium">Please swipe your student roll card at the reader sensor to trigger library entry validation, return break, or check out.</p>
+            </div>
+
+            <!-- Card Scanner Slot Indicator -->
+            <div class="w-full h-3 bg-slate-800 rounded-full border border-slate-700 relative overflow-hidden flex items-center justify-center">
+              <span class="text-[8px] font-mono tracking-widest text-slate-400 uppercase select-none">INSERT CARD HERE</span>
+            </div>
+          </div>
+
+          <!-- Manual Tap input -->
+          <div class="space-y-4">
+            <h3 class="text-sm font-bold text-slate-300 font-mono">Manual Card Tap Verification</h3>
+            <div class="flex gap-3">
+              <input id="inputRoll" type="text" placeholder="Enter Thapar Roll ID (e.g. 102103005)" class="flex-grow bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:border-indigo-500 transition-all font-mono" />
+              <button id="btnManualTap" class="bg-indigo-650 hover:bg-indigo-600 text-white font-bold px-6 py-3 rounded-xl text-xs transition-all shadow-md flex items-center gap-2">
+                Swipe Card
+              </button>
+            </div>
+            <div id="gateErrorText" class="text-xs text-rose-450 font-bold hidden"></div>
+          </div>
+
+        </div>
+
+      </section>
+
+      <!-- RIGHT COL: ACTIVE RESERVATION LIST & SHORTCUTS (5 COLS) -->
+      <section class="lg:col-span-5 flex flex-col justify-between">
+        
+        <div class="bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-xl flex flex-col justify-between h-full space-y-6">
+          <div>
+            <h3 class="text-sm font-bold text-slate-350 font-mono mb-2 flex items-center justify-between">
+              <span>Quick Simulation Panel</span>
+              <span class="text-[9px] bg-slate-800 border border-slate-700 text-slate-400 px-2 py-0.5 rounded uppercase">Developer Toolkit</span>
+            </h3>
+            <p class="text-xs text-slate-500 mb-6">List of active database bookings. Click "Swipe" next to any student to instantly trigger their card tap at the gate.</p>
+            
+            <div class="space-y-6 max-h-[380px] overflow-y-auto pr-1">
+              
+              <!-- 1. Pending Claim Section -->
+              <div>
+                <h4 class="text-[10px] font-bold font-mono text-amber-500 uppercase tracking-widest mb-2 flex items-center gap-1.5">
+                  <span class="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse"></span> Pending Entry Taps (Within 3m)
+                </h4>
+                <div id="listPending" class="space-y-2">
+                  <!-- Rendered dynamically -->
+                </div>
+              </div>
+
+              <!-- 2. Away Break Section -->
+              <div>
+                <h4 class="text-[10px] font-bold font-mono text-indigo-400 uppercase tracking-widest mb-2 flex items-center gap-1.5">
+                  <span class="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse"></span> Grace Break Returns
+                </h4>
+                <div id="listGrace" class="space-y-2">
+                  <!-- Rendered dynamically -->
+                </div>
+              </div>
+
+              <!-- 3. Occupied Section -->
+              <div>
+                <h4 class="text-[10px] font-bold font-mono text-emerald-500 uppercase tracking-widest mb-2 flex items-center gap-1.5">
+                  <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span> Active Checkout Taps (Exit)
+                </h4>
+                <div id="listOccupied" class="space-y-2">
+                  <!-- Rendered dynamically -->
+                </div>
+              </div>
+
+            </div>
+          </div>
+
+          <!-- Bottom Summary / Instructions -->
+          <div class="bg-slate-950/60 border border-slate-850 p-4 rounded-2xl text-xs text-slate-550 leading-relaxed font-sans">
+            <span class="font-bold text-slate-400 block mb-1">Dual-Purpose Integration Rules:</span>
+            Tapping verifies entrance within the 3-minute booking hold, resumes sessions from away breaks, or automatically checks out occupancy upon departure.
+          </div>
+        </div>
+
+      </section>
+    </main>
+    
+    <!-- FOOTER -->
+    <footer class="border-t border-slate-900 pt-6 mt-8 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-slate-500">
+      <p>Thapar Institute Smart Library Gate Terminal. Shares real-time database state across portals.</p>
+      <div class="flex gap-4">
+        <a href="index.html" class="hover:text-slate-400 transition-colors font-mono">Directory Home</a>
+        <span>&middot;</span>
+        <a href="student.html" class="hover:text-slate-400 transition-colors font-mono">Student Portal</a>
+        <span>&middot;</span>
+        <a href="librarian.html" class="hover:text-slate-400 transition-colors font-mono">Librarian Workspace</a>
+      </div>
+    </footer>
+  </div>
+
+  <!-- FLOATING TOASTS -->
+  <div id="toastContainer" class="fixed bottom-6 right-6 z-50 flex flex-col gap-3 max-w-sm w-full"></div>
+
+  <!-- GATE SCRIPT -->
+  <script>
+    const API_BASE = window.location.protocol.startsWith('http') ? '' : 'http://localhost:3000';
+    let bookings = [];
+    
+    async function loadState() {
+      try {
+        const res = await fetch(API_BASE + '/api/state');
+        const state = await res.json();
+        bookings = state.bookings || [];
+        renderShortcuts();
+      } catch (err) {
+        console.error("Failed to load gate data state:", err);
+      }
+    }
+
+    // Auto-poll state every 2 seconds
+    setInterval(loadState, 2000);
+
+    function showToast(title, msg, type = "info") {
+      const toast = document.createElement("div");
+      toast.className = `p-4 rounded-2xl border shadow-2xl transition-all duration-300 transform translate-y-2 opacity-0 flex items-start gap-3 bg-slate-900 border-slate-800 text-slate-100 `;
+      
+      if (type === "success") toast.className += "border-emerald-500/30 text-emerald-450";
+      else if (type === "warning") toast.className += "border-amber-500/30 text-amber-450";
+      else if (type === "error") toast.className += "border-rose-500/30 text-rose-450";
+
+      toast.innerHTML = `
+        <div class="flex-grow">
+          <p class="text-xs font-bold font-mono tracking-tight text-slate-200">${title}</p>
+          <p class="text-[11px] text-slate-450 mt-1 leading-relaxed">${msg}</p>
+        </div>
+      `;
+      
+      const container = document.getElementById("toastContainer");
+      if (container) {
+        container.appendChild(toast);
+        setTimeout(() => toast.classList.remove("translate-y-2", "opacity-0"), 50);
+        setTimeout(() => {
+          toast.classList.add("opacity-0", "translate-y-2");
+          setTimeout(() => toast.remove(), 400);
+        }, 5000);
+      }
+    }
+
+    // Swipe ID card execution
+    async function executeGateTap(rollNumber) {
+      const errBox = document.getElementById("gateErrorText");
+      errBox.classList.add("hidden");
+      
+      if (!rollNumber) {
+        errBox.textContent = "Please enter a valid student roll number.";
+        errBox.classList.remove("hidden");
+        return;
+      }
+
+      try {
+        const res = await fetch(API_BASE + '/api/gate/tap', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ studentId: rollNumber })
+        });
+        const data = await res.json();
+        
+        if (data.error) {
+          triggerGateScreenFeedback("denied", "ACCESS DENIED", data.error);
+          showToast("Access Denied", data.error, "error");
+          return;
+        }
+
+        // Handle success display feedbacks
+        const b = data.booking;
+        if (data.action === "entry") {
+          triggerGateScreenFeedback(
+            "success", 
+            "Welcome Entrance", 
+            `Access Granted &bull; ${b.studentName} (${b.studentId})<br>Seat #${b.seatId} check-in verified successfully.`
+          );
+          showToast("Entry Verified", `${b.studentName} has checked into Seat #${b.seatId}.`, "success");
+        } else if (data.action === "re-entry") {
+          triggerGateScreenFeedback(
+            "success", 
+            "Welcome Back", 
+            `Break Session ended &bull; ${b.studentName} (${b.studentId})<br>Returned to Seat #${b.seatId}. Status restored.`
+          );
+          showToast("Return Confirmed", `${b.studentName} returned from grace break.`, "success");
+        } else if (data.action === "exit") {
+          triggerGateScreenFeedback(
+            "exit", 
+            "Goodbye / Exit", 
+            `Checkout complete &bull; ${b.studentName} (${b.studentId})<br>Seat #${b.seatId} released immediately. Thank you.`
+          );
+          showToast("Seat Released", `${b.studentName} checked out at exit gate. Seat #${b.seatId} is free.`, "warning");
+        }
+        
+        document.getElementById("inputRoll").value = "";
+        await loadState();
+
+      } catch (err) {
+        console.error("Gate verification request failed:", err);
+        showToast("System Connection Error", "Could not dispatch card swipe request to server.", "error");
+      }
+    }
+
+    // Trigger visual hardware terminal feedback
+    function triggerGateScreenFeedback(type, title, desc) {
+      const container = document.getElementById("gateScreenContainer");
+      const indicator = document.getElementById("gateVisualIndicator");
+      const titleEl = document.getElementById("gateDisplayTitle");
+      const descEl = document.getElementById("gateDisplayDesc");
+      const laser = document.getElementById("gateLaserLine");
+
+      // Reset classes
+      container.className = "relative bg-slate-950 rounded-2xl border border-slate-800 p-6 flex flex-col justify-between items-center min-h-[350px] overflow-hidden";
+      indicator.className = "w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 animate-pulse ";
+      laser.className = "absolute inset-x-0 h-0.5 pointer-events-none ";
+
+      if (type === "success") {
+        container.className += " screen-glow-success border-emerald-500/30";
+        indicator.className += " bg-emerald-500/20 text-emerald-400 border border-emerald-500/30";
+        laser.className += " bg-gradient-to-r from-transparent via-emerald-500 to-transparent laser-line";
+        indicator.innerHTML = `
+          <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7" /></svg>
+        `;
+      } else if (type === "exit") {
+        container.className += " screen-glow-success border-amber-500/30";
+        indicator.className += " bg-amber-500/20 text-amber-400 border border-amber-500/30";
+        laser.className += " bg-gradient-to-r from-transparent via-amber-500 to-transparent laser-line";
+        indicator.innerHTML = `
+          <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h7a3 3 0 013 3v1" /></svg>
+        `;
+      } else if (type === "denied") {
+        container.className += " screen-glow-error border-rose-500/30";
+        indicator.className += " bg-rose-500/20 text-rose-450 border border-rose-500/30";
+        laser.className += " bg-gradient-to-r from-transparent via-rose-500 to-transparent laser-line";
+        indicator.innerHTML = `
+          <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M6 18L18 6M6 6l12 12" /></svg>
+        `;
+      }
+
+      titleEl.textContent = title;
+      titleEl.className = `text-xl font-bold font-mono tracking-wide ${type === 'denied' ? 'text-rose-450' : (type === 'exit' ? 'text-amber-400' : 'text-emerald-400')} uppercase`;
+      descEl.innerHTML = desc;
+
+      // Revert display back to idle state after 5 seconds
+      setTimeout(() => {
+        if (titleEl.textContent === title) {
+          container.className = "relative bg-slate-950 rounded-2xl border border-slate-800 p-6 flex flex-col justify-between items-center min-h-[350px] overflow-hidden screen-glow-idle";
+          indicator.className = "w-16 h-16 rounded-full bg-indigo-650/20 text-indigo-400 border border-indigo-500/30 flex items-center justify-center mx-auto mb-4 animate-pulse";
+          laser.className = "absolute inset-x-0 h-0.5 bg-gradient-to-r from-transparent via-indigo-500 to-transparent laser-line pointer-events-none";
+          indicator.innerHTML = `
+            <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z" /></svg>
+          `;
+          titleEl.textContent = "Awaiting Card Tap";
+          titleEl.className = "text-xl font-bold font-mono tracking-wide text-indigo-400 uppercase";
+          descEl.innerHTML = "Please swipe your student roll card at the reader sensor to trigger library entry validation, return break, or check out.";
+        }
+      }, 5000);
+    }
+
+    // Render Quick Simulation Panel Shortcuts
+    function renderShortcuts() {
+      const pendingBox = document.getElementById("listPending");
+      const graceBox = document.getElementById("listGrace");
+      const occupiedBox = document.getElementById("listOccupied");
+
+      pendingBox.innerHTML = "";
+      graceBox.innerHTML = "";
+      occupiedBox.innerHTML = "";
+
+      const pendingList = bookings.filter(b => b.status === "pending_claim");
+      const graceList = bookings.filter(b => b.status === "grace");
+      const occupiedList = bookings.filter(b => b.status === "occupied");
+
+      if (pendingList.length === 0) {
+        pendingBox.innerHTML = `<p class="text-[10px] text-slate-600 font-mono italic">No students awaiting entrance...</p>`;
+      } else {
+        pendingList.forEach(b => {
+          pendingBox.innerHTML += `
+            <div class="flex items-center justify-between gap-3 p-2 bg-slate-950/40 rounded-lg border border-slate-850 hover:border-slate-800 transition-all text-xs">
+              <span class="font-mono text-slate-350">${b.studentName} <span class="text-[10px] text-slate-500">(${b.studentId})</span></span>
+              <button onclick="executeGateTap('${b.studentId}')" class="bg-amber-650 hover:bg-amber-600 text-slate-900 font-bold px-2 py-1 rounded text-[9px] font-mono transition-all">SWIPE</button>
+            </div>
+          `;
+        });
+      }
+
+      if (graceList.length === 0) {
+        graceBox.innerHTML = `<p class="text-[10px] text-slate-600 font-mono italic">No students away on break...</p>`;
+      } else {
+        graceList.forEach(b => {
+          graceBox.innerHTML += `
+            <div class="flex items-center justify-between gap-3 p-2 bg-slate-950/40 rounded-lg border border-slate-850 hover:border-slate-800 transition-all text-xs">
+              <span class="font-mono text-slate-350">${b.studentName} <span class="text-[10px] text-slate-500">(${b.studentId})</span></span>
+              <button onclick="executeGateTap('${b.studentId}')" class="bg-indigo-600 hover:bg-indigo-500 text-white font-bold px-2 py-1 rounded text-[9px] font-mono transition-all">SWIPE</button>
+            </div>
+          `;
+        });
+      }
+
+      if (occupiedList.length === 0) {
+        occupiedBox.innerHTML = `<p class="text-[10px] text-slate-600 font-mono italic">No active occupied check-ins...</p>`;
+      } else {
+        occupiedList.forEach(b => {
+          occupiedBox.innerHTML += `
+            <div class="flex items-center justify-between gap-3 p-2 bg-slate-950/40 rounded-lg border border-slate-850 hover:border-slate-800 transition-all text-xs">
+              <span class="font-mono text-slate-350">${b.studentName} <span class="text-[10px] text-slate-500">(${b.studentId})</span></span>
+              <button onclick="executeGateTap('${b.studentId}')" class="bg-rose-600 hover:bg-rose-500 text-white font-bold px-2 py-1 rounded text-[9px] font-mono transition-all">SWIPE</button>
+            </div>
+          `;
+        });
+      }
+    }
+
+    // Manual swipe click
+    document.getElementById("btnManualTap").onclick = () => {
+      const rollInput = document.getElementById("inputRoll");
+      const val = rollInput.value.trim();
+      executeGateTap(val);
+    };
+
+    // Listen to Enter key
+    document.getElementById("inputRoll").addEventListener("keyup", (e) => {
+      if (e.key === "Enter") {
+        const val = e.target.value.trim();
+        executeGateTap(val);
+      }
+    });
+
+    loadState();
+  </script>
+</body>
+</html>

@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Thapar Library - Smart Allocation System</title>
+  
+  <!-- Premium Font & Tailwind CSS CDN -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['"Plus Jakarta Sans"', 'sans-serif'],
+            mono: ['"Space Grotesk"', 'monospace'],
+          },
+          colors: {
+            thapar: {
+              red: '#C8102E',      // Thapar Brand Crimson Red
+              darkRed: '#a00c22',  // Darker brand red
+              redLight: '#FDF2F4', // Soft red/pink tint
+            }
+          }
+        }
+      }
+    }
+  </script>
+  
+  <style>
+    body {
+      background-color: #F8FAFC;
+      background-image: 
+        radial-gradient(at 0% 0%, rgba(200, 16, 46, 0.04) 0px, transparent 50%),
+        radial-gradient(at 100% 100%, rgba(30, 41, 59, 0.02) 0px, transparent 50%);
+      background-attachment: fixed;
+    }
+  </style>
+</head>
+<body class="text-slate-800 font-sans min-h-screen flex flex-col justify-between p-6">
+
+  <!-- Empty element for alignment -->
+  <div></div>
+
+  <!-- Central Card -->
+  <div class="max-w-4xl w-full mx-auto bg-white border border-slate-200 rounded-3xl p-8 md:p-12 shadow-sm space-y-8 text-center relative overflow-hidden">
+    
+    <!-- Red Top Line Glow -->
+    <div class="absolute top-0 inset-x-0 h-1.5 bg-thapar-red"></div>
+    
+    <!-- Logo -->
+    <div class="flex justify-center mb-2">
+      <img id="thaparLogo" src="thapar_logo.png" alt="Thapar Institute Logo" class="h-24 md:h-32 object-contain" onerror="this.src='https://upload.wikimedia.org/wikipedia/en/b/bf/Thapar_Institute_of_Engineering_and_Technology_logo.png'" />
+    </div>
+
+    <!-- Title Header -->
+    <div class="max-w-xl mx-auto space-y-2">
+      <h1 class="text-2xl md:text-3xl font-extrabold tracking-tight text-slate-900 font-mono">SMART LIBRARY DESK SYSTEM</h1>
+      <p class="text-sm text-slate-500">Live seat layout reservations, dual-purpose entry/exit gate card swiping, and administrator overrides workspace.</p>
+    </div>
+
+    <!-- Portal Selection Columns -->
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-6 pt-4 text-left">
+      
+      <!-- Student Card -->
+      <div class="border border-slate-200 rounded-2xl p-6 hover:border-thapar-red/50 hover:shadow-md transition-all flex flex-col justify-between bg-slate-50/30">
+        <div class="space-y-3">
+          <div class="w-12 h-12 rounded-xl bg-thapar-redLight border border-thapar-red/10 flex items-center justify-center">
+            <!-- Student Icon -->
+            <svg class="w-6 h-6 text-thapar-red" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" /></svg>
+          </div>
+          <h2 class="text-base font-bold text-slate-900 font-mono">Student Portal</h2>
+          <p class="text-xs text-slate-500 leading-relaxed">Search vacant floor plans, check seat availability status, select desks directly from layout grids, and view your notification inbox logs.</p>
+        </div>
+        <a href="student.html" class="w-full mt-6 text-center bg-thapar-red hover:bg-thapar-darkRed text-white font-bold py-2.5 rounded-xl text-xs transition-all shadow-md flex items-center justify-center gap-1">
+          <span>Enter Student Terminal</span>
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" /></svg>
+        </a>
+      </div>
+
+      <!-- Gate Card -->
+      <div class="border border-slate-200 rounded-2xl p-6 hover:border-indigo-500/50 hover:shadow-md transition-all flex flex-col justify-between bg-slate-50/30">
+        <div class="space-y-3">
+          <div class="w-12 h-12 rounded-xl bg-indigo-50 border border-indigo-150 flex items-center justify-center">
+            <!-- Keycard Icon -->
+            <svg class="w-6 h-6 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" /></svg>
+          </div>
+          <h2 class="text-base font-bold text-slate-900 font-mono">Gate Simulator</h2>
+          <p class="text-xs text-slate-500 leading-relaxed">Simulate physical card taps at the entry/exit gates. Processes entrance check-ins within 3-minutes, end grace breaks, or auto-checkout occupants.</p>
+        </div>
+        <a href="gate.html" class="w-full mt-6 text-center bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2.5 rounded-xl text-xs transition-all shadow-md flex items-center justify-center gap-1">
+          <span>Enter Gate Simulator</span>
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" /></svg>
+        </a>
+      </div>
+
+      <!-- Librarian Card -->
+      <div class="border border-slate-200 rounded-2xl p-6 hover:border-slate-400 hover:shadow-md transition-all flex flex-col justify-between bg-slate-50/30">
+        <div class="space-y-3">
+          <div class="w-12 h-12 rounded-xl bg-slate-100 border border-slate-200 flex items-center justify-center">
+            <!-- Librarian/Key Icon -->
+            <svg class="w-6 h-6 text-slate-700" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" /></svg>
+          </div>
+          <h2 class="text-base font-bold text-slate-900 font-mono">Librarian Workspace</h2>
+          <p class="text-xs text-slate-500 leading-relaxed">Oversee library statistics, manage student ghost empty-desk reports, execute direct overrides, and view system audit logs.</p>
+        </div>
+        <a href="librarian.html" class="w-full mt-6 text-center bg-slate-800 hover:bg-slate-900 text-white font-bold py-2.5 rounded-xl text-xs transition-all flex items-center justify-center gap-1">
+          <span>Enter Librarian Workspace</span>
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" /></svg>
+        </a>
+      </div>
+      
+    </div>
+
+  </div>
+
+  <!-- Footer -->
+  <footer class="text-center text-xs text-slate-400 py-4 max-w-lg mx-auto">
+    Thapar Institute of Engineering & Technology Smart Library Initiative. 
+    State is shared and synchronized in real-time across terminals.
+  </footer>
+
+</body>
+</html>

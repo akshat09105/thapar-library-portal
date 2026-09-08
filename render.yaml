@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: thapar-library-portal
+    env: node
+    plan: free
+    buildCommand: npm install
+    startCommand: node server.js
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production

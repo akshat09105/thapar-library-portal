@@ -137,6 +137,17 @@ function initSchema() {
       time TEXT NOT NULL,
       timestamp INTEGER NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS otps (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      email TEXT NOT NULL,
+      roll TEXT NOT NULL,
+      otp TEXT NOT NULL,
+      expires_at INTEGER NOT NULL,
+      created_at INTEGER NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_otps_lookup ON otps(email, otp);
   `);
 
   // Seed default demo_speed if not set
@@ -856,6 +867,36 @@ function clearLogs() {
   appendLog("System logs wiped.", "system");
 }
 
+function saveOtp({ email, roll, otp, expiresAt }) {
+  db.prepare('DELETE FROM otps WHERE LOWER(email) = LOWER(?) OR roll = ?').run(email, roll);
+  db.prepare(`
+    INSERT INTO otps (email, roll, otp, expires_at, created_at)
+    VALUES (?, ?, ?, ?, ?)
+  `).run(email, roll, otp, expiresAt, Date.now());
+  return { success: true };
+}
+
+function verifyOtp({ email, roll, otp }) {
+  const now = Date.now();
+  const row = db.prepare(`
+    SELECT * FROM otps 
+    WHERE (LOWER(email) = LOWER(?) OR roll = ?) AND otp = ?
+    ORDER BY id DESC LIMIT 1
+  `).get(email, roll, otp);
+
+  if (!row) {
+    return { valid: false, error: "Incorrect OTP verification code." };
+  }
+
+  if (row.expires_at < now) {
+    db.prepare('DELETE FROM otps WHERE id = ?').run(row.id);
+    return { valid: false, error: "Verification code has expired. Please request a new OTP." };
+  }
+
+  db.prepare('DELETE FROM otps WHERE id = ?').run(row.id);
+  return { valid: true };
+}
+
 // Initialize database schema upon module load
 initSchema();
 
@@ -864,6 +905,8 @@ module.exports = {
   readState,
   appendLog,
   sendMockEmail,
+  saveOtp,
+  verifyOtp,
   reserveSeat: (data) => reserveSeatTx(data),
   checkIn: (data) => checkInTx(data),
   checkout: (data) => checkoutTx(data),

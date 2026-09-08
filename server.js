@@ -1,10 +1,27 @@
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
+const fs = require('fs');
+const { Resend } = require('resend');
 const db = require('./database');
+
+// Attempt to load .env in local development if present
+try {
+  if (fs.existsSync(path.join(__dirname, '.env'))) {
+    const envContent = fs.readFileSync(path.join(__dirname, '.env'), 'utf8');
+    envContent.split('\n').forEach(line => {
+      const parts = line.trim().split('=');
+      if (parts[0] && parts[1] && !process.env[parts[0]]) {
+        process.env[parts[0]] = parts.slice(1).join('=');
+      }
+    });
+  }
+} catch (_) {}
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const resendApiKey = process.env.RESEND_API_KEY;
+const resend = resendApiKey ? new Resend(resendApiKey) : null;
 
 app.use(cors());
 app.use(express.json());
@@ -54,6 +71,135 @@ app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.static(__dirname));
 
 // REST APIs
+
+// 0. Authentication: Send OTP via Resend
+app.post('/api/auth/send-otp', async (req, res) => {
+  const { email, roll, name } = req.body;
+  if (!email || !roll) {
+    return res.status(400).json({ error: "Please provide student roll number and @thapar.edu email." });
+  }
+
+  const cleanEmail = email.trim().toLowerCase();
+  const cleanRoll = roll.trim();
+  const cleanName = (name || 'Student').trim();
+
+  // Generate secure 6-digit numeric OTP
+  const otp = Math.floor(100000 + Math.random() * 900000).toString();
+  const expiresAt = Date.now() + (5 * 60 * 1000); // 5-minute validity
+
+  // Store OTP record in SQLite
+  db.saveOtp({ email: cleanEmail, roll: cleanRoll, otp, expiresAt });
+
+  // Styled Crimson-Branded Email Template
+  const emailHtml = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="utf-8">
+      <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f8fafc; margin: 0; padding: 20px; }
+        .card { max-width: 500px; margin: 20px auto; background: #ffffff; border-radius: 20px; border: 1px solid #e2e8f0; overflow: hidden; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.06); }
+        .header { background: #C8102E; padding: 26px; text-align: center; color: white; }
+        .header h1 { margin: 0; font-size: 20px; font-weight: 800; letter-spacing: 0.5px; }
+        .header p { margin: 6px 0 0 0; font-size: 12px; opacity: 0.9; }
+        .content { padding: 32px 24px; text-align: center; }
+        .greeting { font-size: 15px; color: #1e293b; margin-bottom: 8px; }
+        .code-box { background: #fdf2f4; border: 2px dashed #C8102E; border-radius: 16px; padding: 18px 28px; margin: 22px auto; display: inline-block; }
+        .code { font-family: 'Space Grotesk', monospace, sans-serif; font-size: 34px; font-weight: 800; color: #C8102E; letter-spacing: 8px; }
+        .validity { font-size: 12px; color: #64748b; margin-top: 14px; font-weight: 500; }
+        .warning { font-size: 11px; color: #94a3b8; margin-top: 24px; border-top: 1px solid #f1f5f9; padding-top: 16px; }
+      </style>
+    </head>
+    <body>
+      <div class="card">
+        <div class="header">
+          <h1>THAPAR INSTITUTE</h1>
+          <p>Smart Library Seat Allocation Portal</p>
+        </div>
+        <div class="content">
+          <p class="greeting">Hello <strong>${cleanName}</strong> (Roll: ${cleanRoll}),</p>
+          <p style="font-size: 13px; color: #64748b; margin: 0;">Use the verification code below to log in to the student library portal:</p>
+          
+          <div class="code-box">
+            <span class="code">${otp}</span>
+          </div>
+          
+          <p class="validity">⏱️ Valid for <strong>5 minutes</strong>. Do not share this code.</p>
+          <p class="warning">If you did not request this OTP, please disregard this email.</p>
+        </div>
+      </div>
+    </body>
+    </html>
+  `;
+
+  let sentTo = cleanEmail;
+  let deliveryStatus = "sent";
+
+  try {
+    // 1. Dispatch through Resend
+    const dispatch = await resend.emails.send({
+      from: 'Thapar Library <onboarding@resend.dev>',
+      to: [cleanEmail],
+      subject: `Your Thapar Library Verification Code: ${otp}`,
+      html: emailHtml
+    });
+
+    if (dispatch.error) {
+      console.warn("[Resend Notice for recipient]:", dispatch.error.message);
+      // If Resend free tier restrictions apply, auto-forward to registered owner account
+      if (dispatch.error.message && dispatch.error.message.includes('akshat9105@gmail.com')) {
+        await resend.emails.send({
+          from: 'Thapar Library <onboarding@resend.dev>',
+          to: ['akshat9105@gmail.com'],
+          subject: `[Student OTP for ${cleanRoll}] Code: ${otp}`,
+          html: `<p style="font-family:sans-serif;font-size:13px;background:#fef3c7;border:1px solid #f59e0b;padding:12px;border-radius:10px;"><strong>Notice:</strong> Forwarded OTP for Student: <b>${cleanEmail}</b> (Roll: <b>${cleanRoll}</b>)</p>` + emailHtml
+        });
+        sentTo = `${cleanEmail} (Delivered to akshat9105@gmail.com)`;
+      }
+    }
+  } catch (err) {
+    console.error("Resend API Exception:", err.message);
+  }
+
+  // Also log into database emails & audit log so it shows in the student notifications tab
+  db.sendMockEmail(
+    cleanEmail,
+    `Thapar Library Login Code: ${otp}`,
+    `Dear ${cleanName},\n\nYour 6-digit student login verification code is ${otp}.\n\nValid for 5 minutes.\n\nRegards,\nThapar Library Management`
+  );
+  db.appendLog(`[AUTH OTP DISPATCH] Verification code dispatched for ${cleanEmail} (Roll: ${cleanRoll}).`, "event");
+
+  res.json({
+    success: true,
+    sentTo: sentTo,
+    message: `Verification code sent to ${sentTo}. Please check your inbox or spam folder.`
+  });
+});
+
+// 0. Authentication: Verify OTP
+app.post('/api/auth/verify-otp', (req, res) => {
+  const { email, roll, otp, name } = req.body;
+  if (!email || !roll || !otp) {
+    return res.status(400).json({ error: "Missing verification parameters." });
+  }
+
+  const result = db.verifyOtp({ email: email.trim().toLowerCase(), roll: roll.trim(), otp: otp.trim() });
+  if (!result.valid) {
+    return res.status(400).json({ error: result.error });
+  }
+
+  db.appendLog(`[AUTH SUCCESS] Student login verified for ${name || roll} (${email}).`, "event");
+
+  res.json({
+    success: true,
+    user: {
+      type: "student",
+      name: name ? name.trim() : "Student",
+      email: email.trim().toLowerCase(),
+      id: roll.trim()
+    }
+  });
+});
 
 // 1. GET /api/state: Get complete system snapshot
 app.get('/api/state', (req, res) => {
@@ -239,7 +385,7 @@ setInterval(() => {
   }
 }, 1000);
 
-if (!process.env.VERCEL) {
+if (require.main === module && !process.env.VERCEL) {
   const server = app.listen(PORT, '0.0.0.0', () => {
     console.log(`Smart Library Portal running at http://0.0.0.0:${PORT} (SQL Engine: SQLite WAL)`);
   });

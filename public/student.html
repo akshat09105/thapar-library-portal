@@ -139,7 +139,7 @@
             
             <div id="otpInputRow" class="hidden space-y-2">
               <label class="text-[10px] uppercase font-bold text-slate-500 tracking-wider">Enter OTP Code</label>
-              <input id="stuOtp" type="text" placeholder="4-digit OTP" class="w-full bg-slate-55 border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-800 text-center tracking-widest placeholder-slate-400 focus:outline-none focus:border-thapar-red transition-all" />
+              <input id="stuOtp" type="text" maxlength="6" placeholder="6-digit OTP" class="w-full bg-slate-55 border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-800 text-center tracking-widest font-mono font-bold placeholder-slate-400 focus:outline-none focus:border-thapar-red transition-all" />
               <button id="btnVerifyOtp" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-2 rounded-xl text-xs transition-all">Verify & Login</button>
             </div>
           </div>
@@ -465,12 +465,12 @@
       document.getElementById("stuName").focus();
     };
 
-    let generatedOtp = null;
-    document.getElementById("btnSendOtp").onclick = () => {
+    document.getElementById("btnSendOtp").onclick = async () => {
       const email = document.getElementById("stuEmail").value.trim().toLowerCase();
       const name = document.getElementById("stuName").value.trim();
       const roll = document.getElementById("stuRoll").value.trim();
       const errBox = document.getElementById("loginError");
+      const btn = document.getElementById("btnSendOtp");
       errBox.classList.add("hidden");
 
       if (!name || !roll || !email) {
@@ -484,32 +484,92 @@
         return;
       }
 
-      generatedOtp = String(Math.floor(1000 + Math.random() * 9000));
-      const demoOtpBox = document.getElementById("demoOtpBox");
-      demoOtpBox.innerHTML = `
-        <span class="text-slate-900 font-bold block mb-1">SSO Sandbox OTP Intercepted:</span>
-        Your verification code is <strong class="text-thapar-red underline text-sm">${generatedOtp}</strong>. 
-      `;
-      demoOtpBox.classList.remove("hidden");
-      document.getElementById("otpInputRow").classList.remove("hidden");
+      btn.disabled = true;
+      btn.textContent = "Dispatching OTP Email...";
+      btn.classList.add("opacity-75");
+
+      try {
+        const res = await fetch(API_BASE + '/api/auth/send-otp', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, roll, name })
+        });
+        const data = await res.json();
+        btn.disabled = false;
+        btn.textContent = "Resend OTP";
+        btn.classList.remove("opacity-75");
+
+        if (data.error) {
+          errBox.textContent = data.error;
+          errBox.classList.remove("hidden");
+          return;
+        }
+
+        const demoOtpBox = document.getElementById("demoOtpBox");
+        demoOtpBox.innerHTML = `
+          <div class="flex items-start gap-2">
+            <span class="text-base">📧</span>
+            <div>
+              <span class="text-slate-900 font-bold block mb-0.5">Verification Code Dispatched!</span>
+              <span>${data.message || 'OTP code has been sent to your email.'}</span>
+            </div>
+          </div>
+        `;
+        demoOtpBox.classList.remove("hidden");
+        document.getElementById("otpInputRow").classList.remove("hidden");
+        document.getElementById("stuOtp").focus();
+        showToast("OTP Dispatched", `Verification code sent to ${email}.`, "success");
+      } catch (e) {
+        btn.disabled = false;
+        btn.textContent = "Send OTP";
+        btn.classList.remove("opacity-75");
+        errBox.textContent = "Failed to connect to authentication server.";
+        errBox.classList.remove("hidden");
+      }
     };
 
-    document.getElementById("btnVerifyOtp").onclick = () => {
+    document.getElementById("btnVerifyOtp").onclick = async () => {
       const enteredOtp = document.getElementById("stuOtp").value.trim();
+      const email = document.getElementById("stuEmail").value.trim().toLowerCase();
+      const name = document.getElementById("stuName").value.trim();
+      const roll = document.getElementById("stuRoll").value.trim();
       const errBox = document.getElementById("loginError");
-      
-      if (enteredOtp !== generatedOtp) {
-        errBox.textContent = "Incorrect OTP verification code.";
+      const btn = document.getElementById("btnVerifyOtp");
+      errBox.classList.add("hidden");
+
+      if (!enteredOtp || enteredOtp.length !== 6) {
+        errBox.textContent = "Please enter the 6-digit verification code.";
         errBox.classList.remove("hidden");
         return;
       }
 
-      const email = document.getElementById("stuEmail").value.trim();
-      const name = document.getElementById("stuName").value.trim();
-      const roll = document.getElementById("stuRoll").value.trim();
+      btn.disabled = true;
+      btn.textContent = "Verifying...";
 
-      currentUser = { type: "student", name, email, id: roll };
-      onLoginCompleted();
+      try {
+        const res = await fetch(API_BASE + '/api/auth/verify-otp', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, roll, otp: enteredOtp, name })
+        });
+        const data = await res.json();
+        btn.disabled = false;
+        btn.textContent = "Verify & Login";
+
+        if (data.error) {
+          errBox.textContent = data.error;
+          errBox.classList.remove("hidden");
+          return;
+        }
+
+        currentUser = data.user;
+        onLoginCompleted();
+      } catch (e) {
+        btn.disabled = false;
+        btn.textContent = "Verify & Login";
+        errBox.textContent = "Verification request failed. Please check network connection.";
+        errBox.classList.remove("hidden");
+      }
     };
 
     function onLoginCompleted() {

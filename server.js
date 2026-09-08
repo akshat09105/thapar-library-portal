@@ -135,30 +135,29 @@ app.post('/api/auth/send-otp', async (req, res) => {
   let sentTo = cleanEmail;
   let deliveryStatus = "sent";
 
-  try {
-    // 1. Dispatch through Resend
-    const dispatch = await resend.emails.send({
-      from: 'Thapar Library <onboarding@resend.dev>',
-      to: [cleanEmail],
-      subject: `Your Thapar Library Verification Code: ${otp}`,
-      html: emailHtml
-    });
+  const activeKey = process.env.RESEND_API_KEY || (typeof resendApiKey !== 'undefined' ? resendApiKey : null);
+  const activeResend = activeKey ? new Resend(activeKey) : null;
 
-    if (dispatch.error) {
-      console.warn("[Resend Notice for recipient]:", dispatch.error.message);
-      // If Resend free tier restrictions apply, auto-forward to registered owner account
-      if (dispatch.error.message && dispatch.error.message.includes('akshat9105@gmail.com')) {
-        await resend.emails.send({
-          from: 'Thapar Library <onboarding@resend.dev>',
-          to: ['akshat9105@gmail.com'],
-          subject: `[Student OTP for ${cleanRoll}] Code: ${otp}`,
-          html: `<p style="font-family:sans-serif;font-size:13px;background:#fef3c7;border:1px solid #f59e0b;padding:12px;border-radius:10px;"><strong>Notice:</strong> Forwarded OTP for Student: <b>${cleanEmail}</b> (Roll: <b>${cleanRoll}</b>)</p>` + emailHtml
-        });
-        sentTo = `${cleanEmail} (Delivered to akshat9105@gmail.com)`;
-      }
+  if (activeResend) {
+    try {
+      // In Resend free sandbox, onboarding@resend.dev delivers directly to account owner (akshat9105@gmail.com)
+      const targetRecipient = 'akshat9105@gmail.com';
+      const dispatch = await activeResend.emails.send({
+        from: 'Thapar Library <onboarding@resend.dev>',
+        to: [targetRecipient],
+        subject: `Thapar Library Verification Code: ${otp}`,
+        html: `<div style="background:#fef2f2;border:1px solid #fca5a5;padding:12px 18px;border-radius:12px;margin-bottom:16px;font-family:-apple-system,BlinkMacSystemFont,sans-serif;font-size:13px;color:#991b1b;">
+          <strong>Student Authentication Request:</strong> Roll <strong>${cleanRoll}</strong> (${cleanEmail}) is logging in.
+        </div>` + emailHtml
+      });
+
+      console.log("[Resend Email Sent]:", dispatch);
+      sentTo = targetRecipient;
+    } catch (err) {
+      console.error("Resend API Exception:", err.message);
     }
-  } catch (err) {
-    console.error("Resend API Exception:", err.message);
+  } else {
+    console.warn("No RESEND_API_KEY detected on serverless instance.");
   }
 
   // Also log into database emails & audit log so it shows in the student notifications tab

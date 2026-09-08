@@ -49,7 +49,8 @@ app.use((req, res, next) => {
   next();
 });
 
-// Serve static HTML/JS files from the root directory
+// Serve static HTML/JS files from public and root directory
+app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.static(__dirname));
 
 // REST APIs

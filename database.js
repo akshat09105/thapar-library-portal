@@ -253,6 +253,12 @@ function sendMockEmail(to, subject, body) {
 
 // 3. Get Complete State Snapshot (Formatted for Terminals)
 function readState() {
+  try {
+    checkTimeouts();
+  } catch (e) {
+    console.error("Timeout evaluation error in readState:", e);
+  }
+
   const seatsRows = db.prepare('SELECT id, zone_key, floor_id, status, booking_id FROM seats ORDER BY zone_key, id').all();
   const seats = {};
   for (const row of seatsRows) {
@@ -303,7 +309,8 @@ function readState() {
     logs,
     reports,
     emails,
-    demoSpeed
+    demoSpeed,
+    serverTime: Date.now()
   };
 }
 

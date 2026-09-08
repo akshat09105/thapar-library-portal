@@ -239,8 +239,9 @@
                 <span class="text-[9px] font-bold uppercase text-thapar-red tracking-wider font-mono">Physical Floor Map</span>
                 <h3 id="layoutZoneName" class="text-base font-bold text-slate-900">Main / Central Lobby</h3>
               </div>
-              <div class="flex items-center gap-4 text-xs font-mono text-slate-500 bg-slate-50 px-3 py-1.5 rounded-xl border border-slate-200">
+              <div class="flex flex-wrap items-center gap-3 text-xs font-mono text-slate-500 bg-slate-50 px-3 py-1.5 rounded-xl border border-slate-200">
                 <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-sm bg-white border border-slate-200"></span> Free</span>
+                <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-sm bg-thapar-red ring-2 ring-thapar-red/40"></span> Selected</span>
                 <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-sm bg-amber-500/20 border border-amber-500/40 animate-pulse"></span> Reserved</span>
                 <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-sm bg-thapar-redLight border border-thapar-red/20"></span> Taken</span>
                 <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-sm bg-indigo-100 border border-indigo-300"></span> Break</span>
@@ -252,22 +253,37 @@
               <!-- Seat squares loaded dynamically -->
             </div>
 
-            <!-- Booking form -->
-            <div id="bookingControlsBox" class="bg-slate-50 border border-slate-200 rounded-2xl p-5 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+            <!-- Modern 2-Step Booking Bar with Red Confirmation Button -->
+            <div id="bookingControlsBox" class="bg-slate-50 border border-slate-200 rounded-2xl p-5 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 transition-all">
               <div class="space-y-1">
-                <p class="text-sm font-bold text-slate-900">Direct Seat Booking</p>
-                <p class="text-xs text-slate-500 leading-relaxed">Choose your booking duration below, then click any vacant (white) seat on the map grid to instantly book it.</p>
+                <div class="flex items-center gap-2">
+                  <p class="text-sm font-bold text-slate-900 font-mono">Desk Selection & Reservation</p>
+                  <span id="selectedSeatBadge" class="hidden text-[11px] font-mono font-bold bg-thapar-red text-white px-2.5 py-0.5 rounded-lg tracking-wider animate-pulse">
+                    <!-- Dynamic -->
+                  </span>
+                </div>
+                <p id="selectedSeatHelper" class="text-xs text-slate-500 leading-relaxed">
+                  Click any vacant (white) desk above to pick your seat, then click the Red Button to confirm.
+                </p>
               </div>
               
-              <div class="flex items-center gap-3 shrink-0">
-                <label class="text-xs text-slate-500 font-semibold font-mono">Duration:</label>
-                <select id="bookDurationSelect" class="bg-white border border-slate-200 rounded-xl px-3 py-1.5 text-xs text-slate-700 font-mono focus:outline-none focus:border-thapar-red">
-                  <option value="1">1 Hour</option>
-                  <option value="2" selected>2 Hours</option>
-                  <option value="4">4 Hours</option>
-                  <option value="6">6 Hours</option>
-                  <option value="8">8 Hours</option>
-                </select>
+              <div class="flex flex-wrap items-center gap-3 w-full md:w-auto shrink-0 justify-end">
+                <div class="flex items-center gap-2 bg-white border border-slate-200 rounded-xl px-3 py-2 shadow-sm">
+                  <label class="text-xs text-slate-500 font-semibold font-mono">Duration:</label>
+                  <select id="bookDurationSelect" class="bg-transparent text-xs text-slate-700 font-mono font-bold focus:outline-none cursor-pointer">
+                    <option value="1">1 Hour</option>
+                    <option value="2" selected>2 Hours</option>
+                    <option value="4">4 Hours</option>
+                    <option value="6">6 Hours</option>
+                    <option value="8">8 Hours</option>
+                  </select>
+                </div>
+                
+                <!-- PROMINENT RED CONFIRMATION BUTTON -->
+                <button id="btnConfirmBookSeat" onclick="confirmBookSelectedSeat()" disabled class="w-full sm:w-auto bg-slate-200 text-slate-400 font-bold px-6 py-2.5 rounded-xl text-xs transition-all shadow-sm flex items-center justify-center gap-2 cursor-not-allowed font-mono">
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg>
+                  <span id="btnConfirmBookText">Select a Seat Above</span>
+                </button>
               </div>
             </div>
           </div>
@@ -390,6 +406,8 @@
     }
     let activeFloor = "ground";
     let selectedZoneKey = null;
+    let selectedSeatId = null;
+    window.serverTimeOffset = 0;
     
     let demoSpeed = false;
 
@@ -403,6 +421,9 @@
         logs = state.logs;
         emails = state.emails || [];
         demoSpeed = state.demoSpeed;
+        if (state.serverTime) {
+          window.serverTimeOffset = state.serverTime - Date.now();
+        }
         renderAll();
       } catch (err) {
         console.error("Failed to fetch state from API server:", err);
@@ -589,6 +610,7 @@
     window.changeFloor = function(floorId) {
       activeFloor = floorId;
       selectedZoneKey = null;
+      selectedSeatId = null;
       document.getElementById("activeZoneLayoutCard").classList.add("hidden");
       renderAll();
     };
@@ -654,6 +676,7 @@
 
     window.selectZone = function(zoneKey) {
       selectedZoneKey = zoneKey;
+      selectedSeatId = null;
       renderAll();
       const card = document.getElementById("activeZoneLayoutCard");
       card.classList.remove("hidden");
@@ -677,8 +700,12 @@
         let onclickAttr = "";
         
         if (seat.status === "free") {
-          seatClass = "bg-white border-slate-200 hover:border-thapar-red hover:bg-thapar-redLight/30 text-slate-700 cursor-pointer hover:scale-105 shadow-sm";
-          onclickAttr = `onclick="selectSeat('${seat.id}')"`;
+          if (selectedSeatId === seat.id) {
+            seatClass = "bg-thapar-red text-white border-thapar-red shadow-lg ring-4 ring-thapar-red/30 scale-110 font-bold cursor-pointer transition-all";
+          } else {
+            seatClass = "bg-white border-slate-200 hover:border-thapar-red hover:bg-thapar-redLight/40 text-slate-700 cursor-pointer hover:scale-105 shadow-sm transition-all";
+          }
+          onclickAttr = `onclick="handleSeatSelection('${seat.id}')"`;
         } else if (seat.status === "pending") {
           const b = bookings.find(x => x.id === seat.bookingId);
           if (b && currentUser && b.studentId === currentUser.id) {
@@ -714,17 +741,70 @@
           </div>
         `;
       });
+
+      updateBookingBar();
     }
 
-    // Direct Seat Booking trigger on map click
-    window.selectSeat = async function(seatId) {
+    // Step 1: Handle Clicking Seat on Grid (Toggle Select)
+    window.handleSeatSelection = function(seatId) {
       if (!currentUser) {
         showToast("Authentication Required", "Please log in using your student SSO first.", "error");
         return;
       }
-      if (!selectedZoneKey) return;
+      if (selectedSeatId === seatId) {
+        selectedSeatId = null; // Toggle off if clicked again
+      } else {
+        selectedSeatId = seatId;
+      }
+      renderActiveZoneLayout();
+    };
+
+    // Step 2: Update the Booking Bar UI
+    function updateBookingBar() {
+      const badge = document.getElementById("selectedSeatBadge");
+      const helper = document.getElementById("selectedSeatHelper");
+      const btn = document.getElementById("btnConfirmBookSeat");
+      const btnText = document.getElementById("btnConfirmBookText");
+
+      if (!btn || !badge) return;
+
+      if (selectedSeatId) {
+        badge.textContent = `Seat #${selectedSeatId} Selected`;
+        badge.classList.remove("hidden");
+        helper.innerHTML = `You have selected <strong class="text-thapar-red">Seat #${selectedSeatId}</strong>. Choose duration and click the Red Button below to book.`;
+        
+        btn.disabled = false;
+        btn.className = "w-full sm:w-auto bg-thapar-red hover:bg-thapar-darkRed text-white font-bold px-6 py-2.5 rounded-xl text-xs transition-all shadow-md shadow-thapar-red/20 flex items-center justify-center gap-2 cursor-pointer font-mono transform hover:scale-[1.02] active:scale-95";
+        btnText.textContent = `Book Seat #${selectedSeatId}`;
+      } else {
+        badge.classList.add("hidden");
+        helper.textContent = "Click any vacant (white) desk above to pick your seat, then click the Red Button to confirm.";
+        
+        btn.disabled = true;
+        btn.className = "w-full sm:w-auto bg-slate-200 text-slate-400 font-bold px-6 py-2.5 rounded-xl text-xs transition-all shadow-sm flex items-center justify-center gap-2 cursor-not-allowed font-mono";
+        btnText.textContent = "Select a Seat Above";
+      }
+    }
+
+    // Step 3: Trigger Booking from Prominent Red Button
+    window.confirmBookSelectedSeat = async function() {
+      if (!currentUser) {
+        showToast("Authentication Required", "Please log in using your student SSO first.", "error");
+        return;
+      }
+      if (!selectedZoneKey || !selectedSeatId) {
+        showToast("Seat Selection Missing", "Please select a vacant seat from the map first.", "warning");
+        return;
+      }
 
       const durationHours = parseInt(document.getElementById("bookDurationSelect").value);
+      const btn = document.getElementById("btnConfirmBookSeat");
+      const btnText = document.getElementById("btnConfirmBookText");
+      
+      const targetSeatId = selectedSeatId;
+      btn.disabled = true;
+      btnText.textContent = `Booking Seat #${targetSeatId}...`;
+
       try {
         const res = await fetch(API_BASE + '/api/reserve', {
           method: 'POST',
@@ -734,19 +814,26 @@
             studentName: currentUser.name,
             zoneKey: selectedZoneKey,
             duration: durationHours,
-            seatId: seatId
+            seatId: targetSeatId
           })
         });
         const data = await res.json();
         if (data.error) {
           showToast("Booking Denied", data.error, "error");
+          btn.disabled = false;
+          btnText.textContent = `Book Seat #${targetSeatId}`;
           return;
         }
-        showToast("Seat Pre-Reserved", `Seat #${seatId} held for you. Swipe ID card at library entrance gate within 3 minutes to confirm entry.`, "success");
+
+        selectedSeatId = null;
+        showToast("Seat Pre-Reserved", `Seat #${targetSeatId} held for you! Swipe your ID card at the entrance gate within 3 minutes to confirm entry.`, "success");
         await loadData();
         document.getElementById("stuNavMyBookings").click();
       } catch (err) {
         console.error("Booking reservation error:", err);
+        showToast("Booking Error", "Unable to complete reservation request.", "error");
+        btn.disabled = false;
+        btnText.textContent = `Book Seat #${targetSeatId}`;
       }
     };
 
@@ -835,6 +922,15 @@
     };
 
     window.reportGhostBooking = async function(seatId, zoneKey) {
+      if (!currentUser) return;
+      const modal = document.getElementById("studentSeatInspectModal");
+      const btn = modal ? modal.querySelector("button[onclick*='reportGhostBooking']") : null;
+      if (btn) {
+        btn.disabled = true;
+        btn.textContent = "Reporting...";
+        btn.classList.add("opacity-50", "cursor-not-allowed");
+      }
+
       try {
         const res = await fetch(API_BASE + '/api/reports/create', {
           method: 'POST',
@@ -844,6 +940,11 @@
         const data = await res.json();
         if (data.error) {
           showToast("Report Blocked", data.error, "error");
+          if (btn) {
+            btn.disabled = false;
+            btn.textContent = "👻 Report Ghost Booking";
+            btn.classList.remove("opacity-50", "cursor-not-allowed");
+          }
           return;
         }
         closeStudentInspectModal();
@@ -851,19 +952,26 @@
         await loadData();
       } catch (err) {
         console.error("Ghost booking report error:", err);
+        if (btn) {
+          btn.disabled = false;
+          btn.textContent = "👻 Report Ghost Booking";
+          btn.classList.remove("opacity-50", "cursor-not-allowed");
+        }
       }
     };
 
-    // My active bookings list
+    // My active bookings list (Stable DOM - Prevents flickering & jumping)
     function renderMyReservations() {
       const container = document.getElementById("myBookingsList");
       const emptyEl = document.getElementById("myBookingsEmpty");
+      const badge = document.getElementById("bookingBadge");
       if (!container) return;
-      
-      container.innerHTML = "";
-      
+
       if (!currentUser) {
+        container.innerHTML = "";
+        container.dataset.renderedKey = "";
         emptyEl.classList.remove("hidden");
+        badge.classList.add("hidden");
         return;
       }
 
@@ -873,122 +981,178 @@
       );
 
       if (userBookings.length === 0) {
+        container.innerHTML = "";
+        container.dataset.renderedKey = "";
         emptyEl.classList.remove("hidden");
-        document.getElementById("bookingBadge").classList.add("hidden");
+        badge.classList.add("hidden");
         return;
       }
 
-      const badge = document.getElementById("bookingBadge");
       badge.textContent = userBookings.length;
       badge.classList.remove("hidden");
       emptyEl.classList.add("hidden");
 
-      userBookings.forEach(b => {
-        const { zone } = splitZoneKey(b.zoneKey);
-        let cardContent = "";
-        
+      // Stable rendering: only rebuild card structure if bookings list or status changed
+      const currentKey = userBookings.map(b => `${b.id}:${b.status}:${b.seatId}`).join("|");
+      if (container.dataset.renderedKey !== currentKey) {
+        container.dataset.renderedKey = currentKey;
+        container.innerHTML = "";
+
+        userBookings.forEach(b => {
+          const { zone } = splitZoneKey(b.zoneKey);
+          let cardContent = "";
+          
+          if (b.status === "pending_claim") {
+            cardContent = `
+              <div id="card-booking-${b.id}" class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 p-5 rounded-2xl bg-amber-50/50 border border-amber-250 transition-all duration-300">
+                <div class="flex items-start gap-4">
+                  <div class="relative w-14 h-14 rounded-full flex items-center justify-center bg-white border border-slate-200 shrink-0 shadow-sm">
+                    <span id="timer-text-${b.id}" class="text-xs font-mono font-bold text-amber-600">--:--</span>
+                    <svg class="absolute inset-0 w-full h-full transform -rotate-90">
+                      <circle cx="28" cy="28" r="25" stroke="currentColor" class="text-slate-100" stroke-width="2" fill="transparent" />
+                      <circle id="timer-circle-${b.id}" cx="28" cy="28" r="25" stroke="currentColor" class="text-amber-500 transition-[stroke-dashoffset] duration-1000 ease-linear" stroke-width="2" fill="transparent" 
+                              stroke-dasharray="157" stroke-dashoffset="0" />
+                    </svg>
+                  </div>
+                  <div>
+                    <div class="flex items-center gap-2">
+                      <span class="text-[9px] font-bold font-mono tracking-wider uppercase bg-amber-100 text-amber-700 border border-amber-200 px-2 py-0.5 rounded">Pending Gate Entrance</span>
+                      <span class="text-[10px] text-slate-400 font-mono">${b.id}</span>
+                    </div>
+                    <h4 class="text-sm font-bold text-slate-900 mt-1">${zone.name} &bull; Seat #${b.seatId}</h4>
+                    <p class="text-xs text-slate-500 mt-1 leading-relaxed font-medium">To confirm entry, tap your student ID card at the library entrance gate within 3 minutes.</p>
+                  </div>
+                </div>
+                
+                <div class="flex items-center gap-2 w-full sm:w-auto shrink-0">
+                  <button onclick="releaseBooking('${b.id}', 'cancelled')" class="w-full sm:w-auto bg-white hover:bg-slate-50 border border-slate-200 text-slate-550 font-bold px-5 py-2.5 rounded-xl text-xs transition-all font-sans">Cancel Booking</button>
+                </div>
+              </div>
+            `;
+          } else if (b.status === "occupied") {
+            cardContent = `
+              <div id="card-booking-${b.id}" class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 p-5 rounded-2xl bg-thapar-redLight border border-thapar-red/20 transition-all duration-300">
+                <div class="flex items-start gap-4">
+                  <div class="w-12 h-12 rounded-xl bg-thapar-red text-white border border-thapar-red flex items-center justify-center shrink-0 shadow-sm shadow-thapar-red/10">
+                    <span class="text-lg font-mono font-bold">${b.seatId}</span>
+                  </div>
+                  <div>
+                    <div class="flex items-center gap-2">
+                      <span class="text-[9px] font-bold font-mono tracking-wider uppercase bg-thapar-red/10 text-thapar-red border border-thapar-red/20 px-2 py-0.5 rounded">Session Active</span>
+                      <span class="text-[10px] text-slate-550 font-mono">${b.id}</span>
+                    </div>
+                    <h4 class="text-sm font-bold text-slate-900 mt-1">${zone.name}</h4>
+                    <p class="text-xs text-slate-500 mt-1 font-medium">Your seat occupancy is confirmed. Swipe at the library gate on final exit to release automatically.</p>
+                  </div>
+                </div>
+                
+                <div class="flex flex-wrap items-center gap-2 w-full sm:w-auto shrink-0 justify-end">
+                  <div class="flex items-center gap-1.5 bg-white border border-slate-200 rounded-xl px-2 py-1.5">
+                    <label class="text-[9px] font-bold text-slate-400 uppercase font-mono">Break:</label>
+                    <select id="breakDurationSelect-${b.id}" class="bg-transparent text-xs font-semibold text-slate-700 focus:outline-none font-mono">
+                      <option value="10">10 Min</option>
+                      <option value="20">20 Min</option>
+                      <option value="30" selected>30 Min</option>
+                    </select>
+                  </div>
+                  <button onclick="requestStudentBreak('${b.id}')" class="flex-1 sm:flex-initial bg-slate-800 hover:bg-slate-900 text-white font-bold px-4 py-2.5 rounded-xl text-xs transition-all font-sans">Go on Break</button>
+                  <button onclick="releaseBooking('${b.id}', 'released')" class="flex-1 sm:flex-initial bg-white hover:bg-slate-50 border border-slate-200 text-rose-600 font-bold px-4 py-2.5 rounded-xl text-xs transition-all font-sans">Check Out</button>
+                </div>
+              </div>
+            `;
+          } else if (b.status === "grace") {
+            cardContent = `
+              <div id="card-booking-${b.id}" class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 p-5 rounded-2xl bg-indigo-50 border border-indigo-250 transition-all duration-300 animate-pulse">
+                <div class="flex items-start gap-4">
+                  <div class="w-12 h-12 rounded-xl bg-indigo-100 border border-indigo-200 flex items-center justify-center shrink-0">
+                    <span class="text-lg font-mono font-bold text-indigo-700">${b.seatId}</span>
+                  </div>
+                  <div>
+                    <div class="flex items-center gap-2">
+                      <span class="text-[9px] font-bold font-mono tracking-wider uppercase bg-indigo-200 text-indigo-800 border border-indigo-300 px-2 py-0.5 rounded">Away Break Grace</span>
+                      <span class="text-[10px] text-slate-500 font-mono">${b.id}</span>
+                    </div>
+                    <h4 class="text-sm font-bold text-slate-900 mt-1">${zone.name}</h4>
+                    <p class="text-xs text-indigo-700 mt-1 font-semibold">Seat reservation hold: <span id="grace-text-${b.id}" class="font-bold font-mono">--:--</span> remaining.</p>
+                  </div>
+                </div>
+                
+                <div class="flex items-center gap-2 w-full sm:w-auto shrink-0">
+                  <p class="text-xs text-slate-500 font-medium leading-relaxed text-right">
+                    Please tap your ID card at the entrance gate before expiration to resume your session.
+                  </p>
+                </div>
+              </div>
+            `;
+          }
+
+          container.innerHTML += cardContent;
+        });
+      }
+
+      // Smoothly update timer values without wiping DOM
+      updateTimersDirect();
+    }
+
+    // Direct DOM Timer Updater (Zero-Jitter, Monotonic 1s engine)
+    function updateTimersDirect() {
+      if (!currentUser) return;
+      const now = Date.now() + (window.serverTimeOffset || 0);
+
+      bookings.forEach(b => {
+        if (b.studentId !== currentUser.id) return;
+
         if (b.status === "pending_claim") {
           const totalSecs = demoSpeed ? 18 : 180;
-          const remain = Math.max(0, Math.ceil((b.expireAt - Date.now()) / 1000));
+          const remain = Math.max(0, Math.ceil((b.expireAt - now) / 1000));
           const pct = Math.max(0, Math.min(100, Math.round((remain / totalSecs) * 100)));
-          
-          cardContent = `
-            <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 p-5 rounded-2xl bg-amber-50/50 border border-amber-250 transition-all duration-300">
-              <div class="flex items-start gap-4">
-                <div class="relative w-14 h-14 rounded-full flex items-center justify-center bg-white border border-slate-200 shrink-0 shadow-sm">
-                  <span class="text-xs font-mono font-bold text-amber-600">${formatTimeMinutes(remain)}</span>
-                  <svg class="absolute inset-0 w-full h-full transform -rotate-90">
-                    <circle cx="28" cy="28" r="25" stroke="currentColor" class="text-slate-100" stroke-width="2" fill="transparent" />
-                    <circle cx="28" cy="28" r="25" stroke="currentColor" class="text-amber-500 transition-all duration-300" stroke-width="2" fill="transparent" 
-                            stroke-dasharray="157" stroke-dashoffset="${157 - (157 * pct / 100)}" />
-                  </svg>
-                </div>
-                <div>
-                  <div class="flex items-center gap-2">
-                    <span class="text-[9px] font-bold font-mono tracking-wider uppercase bg-amber-100 text-amber-700 border border-amber-200 px-2 py-0.5 rounded">Pending Gate Entrance</span>
-                    <span class="text-[10px] text-slate-400 font-mono">${b.id}</span>
-                  </div>
-                  <h4 class="text-sm font-bold text-slate-900 mt-1">${zone.name} &bull; Seat #${b.seatId}</h4>
-                  <p class="text-xs text-slate-500 mt-1 leading-relaxed font-medium">To confirm entry, tap your student ID card at the library entrance gate within 3 minutes.</p>
-                </div>
-              </div>
-              
-              <div class="flex items-center gap-2 w-full sm:w-auto shrink-0">
-                <button onclick="releaseBooking('${b.id}', 'cancelled')" class="w-full sm:w-auto bg-white hover:bg-slate-50 border border-slate-200 text-slate-550 font-bold px-5 py-2.5 rounded-xl text-xs transition-all font-sans">Cancel Booking</button>
-              </div>
-            </div>
-          `;
-        } else if (b.status === "occupied") {
-          cardContent = `
-            <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 p-5 rounded-2xl bg-thapar-redLight border border-thapar-red/20 transition-all duration-300">
-              <div class="flex items-start gap-4">
-                <div class="w-12 h-12 rounded-xl bg-thapar-red text-white border border-thapar-red flex items-center justify-center shrink-0 shadow-sm shadow-thapar-red/10">
-                  <span class="text-lg font-mono font-bold">${b.seatId}</span>
-                </div>
-                <div>
-                  <div class="flex items-center gap-2">
-                    <span class="text-[9px] font-bold font-mono tracking-wider uppercase bg-thapar-red/10 text-thapar-red border border-thapar-red/20 px-2 py-0.5 rounded">Session Active</span>
-                    <span class="text-[10px] text-slate-550 font-mono">${b.id}</span>
-                  </div>
-                  <h4 class="text-sm font-bold text-slate-900 mt-1">${zone.name}</h4>
-                  <p class="text-xs text-slate-500 mt-1 font-medium">Your seat occupancy is confirmed. Swipe at the library gate on final exit to release automatically.</p>
-                </div>
-              </div>
-              
-              <div class="flex flex-wrap items-center gap-2 w-full sm:w-auto shrink-0 justify-end">
-                <div class="flex items-center gap-1.5 bg-white border border-slate-200 rounded-xl px-2 py-1.5">
-                  <label class="text-[9px] font-bold text-slate-400 uppercase font-mono">Break:</label>
-                  <select id="breakDurationSelect-${b.id}" class="bg-transparent text-xs font-semibold text-slate-700 focus:outline-none font-mono">
-                    <option value="10">10 Min</option>
-                    <option value="20">20 Min</option>
-                    <option value="30" selected>30 Min</option>
-                  </select>
-                </div>
-                <button onclick="requestStudentBreak('${b.id}')" class="flex-1 sm:flex-initial bg-slate-800 hover:bg-slate-900 text-white font-bold px-4 py-2.5 rounded-xl text-xs transition-all font-sans">Go on Break</button>
-                <button onclick="releaseBooking('${b.id}', 'released')" class="flex-1 sm:flex-initial bg-white hover:bg-slate-50 border border-slate-200 text-rose-600 font-bold px-4 py-2.5 rounded-xl text-xs transition-all font-sans">Check Out</button>
-              </div>
-            </div>
-          `;
+
+          const textEl = document.getElementById(`timer-text-${b.id}`);
+          const circleEl = document.getElementById(`timer-circle-${b.id}`);
+
+          if (textEl) {
+            textEl.textContent = formatTimeMinutes(remain);
+            if (remain <= 10) {
+              textEl.className = "text-xs font-mono font-bold text-rose-600 animate-pulse";
+            } else {
+              textEl.className = "text-xs font-mono font-bold text-amber-600";
+            }
+          }
+          if (circleEl) {
+            const offset = 157 - (157 * pct / 100);
+            circleEl.style.strokeDashoffset = offset;
+            if (remain <= 10) {
+              circleEl.setAttribute("class", "text-rose-500 transition-[stroke-dashoffset] duration-1000 ease-linear");
+            } else {
+              circleEl.setAttribute("class", "text-amber-500 transition-[stroke-dashoffset] duration-1000 ease-linear");
+            }
+          }
+
+          if (remain <= 0) {
+            loadData();
+          }
         } else if (b.status === "grace") {
           const duration = b.graceDuration || 30;
           const limit = demoSpeed ? duration * 1000 : duration * 60000;
-          const remain = Math.max(0, Math.ceil((limit - (Date.now() - b.graceStart)) / 1000));
-          
+          const remain = Math.max(0, Math.ceil((limit - (now - b.graceStart)) / 1000));
+
           let displayTime = remain + "s";
           if (remain > 60) {
             displayTime = Math.floor(remain / 60) + "m " + (remain % 60) + "s";
           }
-          
-          cardContent = `
-            <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 p-5 rounded-2xl bg-indigo-50 border border-indigo-250 transition-all duration-300 animate-pulse">
-              <div class="flex items-start gap-4">
-                <div class="w-12 h-12 rounded-xl bg-indigo-100 border border-indigo-200 flex items-center justify-center shrink-0">
-                  <span class="text-lg font-mono font-bold text-indigo-700">${b.seatId}</span>
-                </div>
-                <div>
-                  <div class="flex items-center gap-2">
-                    <span class="text-[9px] font-bold font-mono tracking-wider uppercase bg-indigo-200 text-indigo-800 border border-indigo-300 px-2 py-0.5 rounded">Away Break Grace</span>
-                    <span class="text-[10px] text-slate-500 font-mono">${b.id}</span>
-                  </div>
-                  <h4 class="text-sm font-bold text-slate-900 mt-1">${zone.name}</h4>
-                  <p class="text-xs text-indigo-700 mt-1 font-semibold">Seat reservation hold: ${displayTime} remaining.</p>
-                </div>
-              </div>
-              
-              <div class="flex items-center gap-2 w-full sm:w-auto shrink-0">
-                <p class="text-xs text-slate-500 font-medium leading-relaxed text-right">
-                  Please tap your ID card at the entrance gate before expiration to resume your session.
-                </p>
-              </div>
-            </div>
-          `;
-        }
 
-        container.innerHTML += cardContent;
+          const graceEl = document.getElementById(`grace-text-${b.id}`);
+          if (graceEl) {
+            graceEl.textContent = displayTime;
+          }
+          if (remain <= 0) {
+            loadData();
+          }
+        }
       });
     }
 
-    // Render notifications email list
+    // Render notifications email list (Fix email filter matching)
     function renderNotifications() {
       const container = document.getElementById("notificationsList");
       const emptyEl = document.getElementById("notificationsEmpty");
@@ -1003,8 +1167,13 @@
         return;
       }
 
-      const myEmail = currentUser.id + "@thapar.edu";
-      const myEmails = emails.filter(e => e.to.toLowerCase() === myEmail.toLowerCase());
+      const myRoll = (currentUser.id || "").toLowerCase();
+      const myEmail = (currentUser.email || (myRoll + "@thapar.edu")).toLowerCase();
+
+      const myEmails = emails.filter(e => {
+        const to = (e.to || "").toLowerCase();
+        return to === myEmail || to === (myRoll + "@thapar.edu");
+      });
 
       if (myEmails.length === 0) {
         emptyEl.classList.remove("hidden");
@@ -1066,27 +1235,9 @@
       }
     };
 
-    // LOCAL ONLY VISUAL TICKER
+    // LOCAL ONLY VISUAL TICKER (Smooth 1-second interval)
     setInterval(() => {
-      let stateChanged = false;
-      const now = Date.now();
-
-      bookings.forEach(b => {
-        if (b.status === "pending_claim") {
-          const remainingSecs = Math.max(0, Math.ceil((b.expireAt - now) / 1000));
-          if (b.timeLeft !== remainingSecs) {
-            b.timeLeft = remainingSecs;
-            stateChanged = true;
-          }
-        } else if (b.status === "grace") {
-          stateChanged = true;
-        }
-      });
-
-      if (stateChanged) {
-        renderMyReservations();
-        renderActiveZoneLayout();
-      }
+      updateTimersDirect();
     }, 1000);
 
     // UTILS

@@ -40,3 +40,4 @@ yarn-error.log*
 # Antigravity/Agent temp artifacts
 .agents/
 .gemini/
+temp_vision/

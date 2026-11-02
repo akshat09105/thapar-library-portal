@@ -103,22 +103,22 @@ function initSeatVision() {
   loadCocoModel();
 }
 
-// Background Model Loading
+// API Endpoint Base configuration
+const VISION_API_BASE = (typeof window !== 'undefined' && window.location.protocol.startsWith('http') && (window.location.port === '3000' || window.location.port === ''))
+  ? ''
+  : 'http://localhost:3000';
+
+// Background Model Loading & Engine Handshake
 async function loadCocoModel() {
   const statusEl = document.getElementById('modelStatusBadge');
-  if (window.cocoSsd) {
-    try {
-      if (statusEl) statusEl.innerHTML = `<span class="inline-block w-2 h-2 rounded-full bg-amber-400 animate-ping mr-1.5"></span>Loading Dual-Engine AI...`;
-      SeatVisionState.cocoModel = await cocoSsd.load();
-      SeatVisionState.modelLoaded = true;
-      if (statusEl) statusEl.innerHTML = `<span class="inline-block w-2 h-2 rounded-full bg-emerald-400 mr-1.5"></span>Dual-Engine Vision Ready (PerspectiveNet + COCO)`;
-    } catch (e) {
-      console.warn("TFJS COCO-SSD fallback to PerspectiveNet:", e);
-      if (statusEl) statusEl.innerHTML = `<span class="inline-block w-2 h-2 rounded-full bg-blue-400 mr-1.5"></span>PerspectiveSeatNet Ready (Custom Engine)`;
+  try {
+    const res = await fetch(VISION_API_BASE + '/api/health');
+    if (res.ok) {
+      if (statusEl) statusEl.innerHTML = `<span class="inline-block w-2 h-2 rounded-full bg-emerald-400 mr-1.5 animate-pulse"></span>YOLOv8 Real-Time Neural Vision Ready`;
+      return;
     }
-  } else {
-    if (statusEl) statusEl.innerHTML = `<span class="inline-block w-2 h-2 rounded-full bg-blue-400 mr-1.5"></span>PerspectiveSeatNet v2.4 Active`;
-  }
+  } catch (_) {}
+  if (statusEl) statusEl.innerHTML = `<span class="inline-block w-2 h-2 rounded-full bg-emerald-400 mr-1.5"></span>PerspectiveSeatNet Active`;
 }
 
 // Load Camera Preset
@@ -557,7 +557,7 @@ function handleImageUpload(file) {
   reader.readAsDataURL(file);
 }
 
-// Analyze Uploaded Image using Client Computer Vision Pipeline
+// Analyze Uploaded Image using YOLOv8 Neural Pipeline
 async function analyzeUploadedImage(img) {
   const canvas = document.getElementById('visionCanvas');
   const ctx = canvas.getContext('2d');
@@ -565,12 +565,12 @@ async function analyzeUploadedImage(img) {
   // Set dimensions maintaining aspect ratio
   const maxW = 760;
   const maxH = 500;
-  let w = img.width;
-  let h = img.height;
+  const origW = img.naturalWidth || img.width;
+  const origH = img.naturalHeight || img.height;
   
-  const scale = Math.min(maxW / w, maxH / h);
-  w = Math.round(w * scale);
-  h = Math.round(h * scale);
+  const scale = Math.min(maxW / origW, maxH / origH);
+  const w = Math.round(origW * scale);
+  const h = Math.round(origH * scale);
   
   canvas.width = w;
   canvas.height = h;
@@ -579,86 +579,76 @@ async function analyzeUploadedImage(img) {
   ctx.drawImage(img, 0, 0, w, h);
 
   // Show Loading Overlay
-  ctx.fillStyle = 'rgba(15, 23, 42, 0.7)';
+  ctx.fillStyle = 'rgba(15, 23, 42, 0.75)';
   ctx.fillRect(0, 0, w, h);
   ctx.fillStyle = '#38bdf8';
-  ctx.font = 'bold 16px "Space Grotesk", monospace';
+  ctx.font = 'bold 15px "Space Grotesk", monospace';
   ctx.textAlign = 'center';
-  ctx.fillText('ANALYZING SIDE-ANGLED SEATS & OCCUPANTS...', w / 2, h / 2);
+  ctx.fillText('⚡ PROCESSING REAL CAMERA FEED VIA YOLOV8...', w / 2, h / 2 - 10);
   ctx.font = '12px "Space Grotesk", monospace';
   ctx.fillStyle = '#94a3b8';
-  ctx.fillText('Running Perspective IoU spatial alignment...', w / 2, h / 2 + 25);
+  ctx.fillText('Detecting library chairs, seated persons & spatial IoU...', w / 2, h / 2 + 18);
   ctx.textAlign = 'left';
 
-  // Small delay for smooth UI transition
-  setTimeout(async () => {
-    let chairBoxes = [];
-    let personBoxes = [];
+  try {
+    // Generate base64 from image
+    const offCanvas = document.createElement('canvas');
+    offCanvas.width = origW;
+    offCanvas.height = origH;
+    const offCtx = offCanvas.getContext('2d');
+    offCtx.drawImage(img, 0, 0);
+    const base64Data = offCanvas.toDataURL('image/jpeg', 0.85);
 
-    // Attempt COCO-SSD Detection if model is loaded
-    if (SeatVisionState.cocoModel) {
-      try {
-        const predictions = await SeatVisionState.cocoModel.detect(img);
-        predictions.forEach(p => {
-          const [bx, by, bw, bh] = p.bbox.map(v => v * scale);
-          if (p.class === 'chair' || p.class === 'couch' || p.class === 'bench') {
-            chairBoxes.push([bx, by, bx + bw, by + bh]);
-          } else if (p.class === 'person') {
-            personBoxes.push([bx, by, bx + bw, by + bh]);
-          }
-        });
-      } catch (err) {
-        console.warn("COCO-SSD inference error:", err);
-      }
-    }
-
-    // Perspective Dynamic Geometric Seat Analyzer (Trained from Scratch Heuristic)
-    // Runs if COCO didn't find chairs (due to steep angle/perspective) or to complement detection
-    if (chairBoxes.length < 3) {
-      chairBoxes = generatePerspectiveDeskSlots(w, h, SeatVisionState.perspectiveAngle);
-    }
-
-    // Calculate Occupancy using Perspective IoU
-    const threshold = SeatVisionState.iouThreshold;
-    const detectedSeats = chairBoxes.map((chair, idx) => {
-      let maxIou = 0;
-      let isOccupied = false;
-
-      personBoxes.forEach(person => {
-        const iou = calculatePerspectiveOverlap(chair, person);
-        if (iou > maxIou) maxIou = iou;
-        if (iou >= threshold) isOccupied = true;
-      });
-
-      // If no person detected via COCO but image has color density variance in chair area, estimate
-      if (personBoxes.length === 0) {
-        // Deterministic occupancy estimation based on image contrast
-        isOccupied = (idx % 3 === 0);
-        if (isOccupied) maxIou = 0.65;
-      }
-
-      return {
-        id: `S-${idx + 1}`,
-        box: chair,
-        row: getRowLabel(chair[1], h),
-        status: isOccupied ? 'OCCUPIED' : 'VACANT',
-        iou: maxIou,
-        confidence: Math.round((0.85 + (isOccupied ? maxIou * 0.12 : 0.11)) * 100)
-      };
+    const res = await fetch(VISION_API_BASE + '/api/vision/detect', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        imageBase64: base64Data,
+        iouThreshold: SeatVisionState.iouThreshold,
+        confThreshold: 0.25
+      })
     });
 
-    // Update Detections
-    const emptyCount = detectedSeats.filter(s => s.status === 'VACANT').length;
-    const occupiedCount = detectedSeats.filter(s => s.status === 'OCCUPIED').length;
-    const totalCount = detectedSeats.length;
+    if (!res.ok) {
+      throw new Error(`Server returned HTTP ${res.status}`);
+    }
+
+    const data = await res.json();
+    if (!data.success) {
+      throw new Error(data.error || "Vision analysis failed");
+    }
+
+    // Scale detections to fit current canvas
+    const scaleX = w / (data.imageDimensions?.width || origW);
+    const scaleY = h / (data.imageDimensions?.height || origH);
+
+    const scaledSeats = (data.seats || []).map(seat => ({
+      id: seat.id,
+      box: [
+        Math.round(seat.box[0] * scaleX),
+        Math.round(seat.box[1] * scaleY),
+        Math.round(seat.box[2] * scaleX),
+        Math.round(seat.box[3] * scaleY)
+      ],
+      row: seat.row || 'Study Hall',
+      status: seat.status,
+      iou: seat.iou || 0,
+      confidence: seat.confidence || 85,
+      occupantType: seat.occupantType || 'none'
+    }));
 
     SeatVisionState.detections = {
-      totalSeats: totalCount,
-      emptySeats: emptyCount,
-      occupiedSeats: occupiedCount,
-      occupancyRate: totalCount > 0 ? `${((occupiedCount / totalCount) * 100).toFixed(0)}%` : '0%',
-      seats: detectedSeats,
-      cameraTag: "USER UPLOADED CAMERA ANGLE"
+      totalSeats: data.totalSeats,
+      emptySeats: data.emptySeats,
+      occupiedSeats: data.occupiedSeats,
+      occupancyRate: data.occupancyRate,
+      seats: scaledSeats,
+      cameraTag: "YOLOv8 LIVE NEURAL CCTV",
+      persons: (data.persons || []).map(p => [
+        Math.round(p[0] * scaleX), Math.round(p[1] * scaleY),
+        Math.round(p[2] * scaleX), Math.round(p[3] * scaleY)
+      ]),
+      belongings: data.belongings || []
     };
 
     // Redraw image cleanly
@@ -667,9 +657,42 @@ async function analyzeUploadedImage(img) {
     // Draw Overlays & HUD
     drawOverlays(ctx, w, h);
 
+    // If 0 seats detected, draw an informative badge on canvas
+    if (scaledSeats.length === 0) {
+      ctx.save();
+      ctx.fillStyle = 'rgba(15, 23, 42, 0.82)';
+      ctx.fillRect(w * 0.12, h / 2 - 35, w * 0.76, 70);
+      ctx.strokeStyle = '#f59e0b';
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(w * 0.12, h / 2 - 35, w * 0.76, 70);
+      
+      ctx.fillStyle = '#fbbf24';
+      ctx.font = 'bold 13px "Space Grotesk", monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText('⚠️ NO CHAIRS / SEATS IDENTIFIED IN THIS ANGLE', w / 2, h / 2 - 8);
+      ctx.fillStyle = '#cbd5e1';
+      ctx.font = '11px "Space Grotesk", monospace';
+      ctx.fillText('Please capture desk & chairs directly or adjust camera angle/lighting.', w / 2, h / 2 + 15);
+      ctx.restore();
+    }
+
     // Update Dashboard Metrics
     updateMetricsUI();
-  }, 300);
+
+  } catch (err) {
+    console.error("YOLO Backend Vision failed:", err);
+    ctx.drawImage(img, 0, 0, w, h);
+    ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
+    ctx.fillRect(w * 0.1, h / 2 - 40, w * 0.8, 80);
+    ctx.fillStyle = '#f43f5e';
+    ctx.font = 'bold 13px "Space Grotesk", monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('⚠️ YOLO VISION SERVER ERROR', w / 2, h / 2 - 10);
+    ctx.fillStyle = '#cbd5e1';
+    ctx.font = '11px "Space Grotesk", monospace';
+    ctx.fillText(err.message || 'Make sure backend server is running with python ultralytics.', w / 2, h / 2 + 15);
+    ctx.textAlign = 'left';
+  }
 }
 
 // Generate perspective grid slots along vanishing desk rows

@@ -3,6 +3,7 @@ const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
 const { Resend } = require('resend');
+const { spawn } = require('child_process');
 const db = require('./database');
 
 // Attempt to load .env in local development if present
@@ -24,7 +25,8 @@ const resendApiKey = process.env.RESEND_API_KEY;
 const resend = resendApiKey ? new Resend(resendApiKey) : null;
 
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '35mb' }));
+app.use(express.urlencoded({ extended: true, limit: '35mb' }));
 
 // Health check routes for cloud platforms, Docker, and uptime monitors
 app.get(['/health', '/api/health'], (req, res) => {
@@ -316,6 +318,72 @@ app.post('/api/demo-speed', (req, res) => {
   const { demoSpeed } = req.body;
   db.setDemoSpeed(!!demoSpeed);
   res.json({ success: true, demoSpeed: db.getDemoSpeed() });
+});
+
+// 9b. POST /api/vision/detect: Real YOLOv8 AI Seat & Person Detection
+app.post('/api/vision/detect', async (req, res) => {
+  const { imageBase64, iouThreshold, confThreshold } = req.body;
+  if (!imageBase64) {
+    return res.status(400).json({ error: "Missing image data" });
+  }
+
+  try {
+    const base64Data = imageBase64.replace(/^data:image\/\w+;base64,/, "");
+    const tempDir = path.join(__dirname, 'temp_vision');
+    if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
+
+    const tempFile = path.join(tempDir, `scan_${Date.now()}_${Math.random().toString(36).substring(7)}.jpg`);
+    fs.writeFileSync(tempFile, Buffer.from(base64Data, 'base64'));
+
+    const pyScript = path.join(__dirname, 'model', 'yolo_seat_detector.py');
+    const pythonExe = process.platform === 'win32' ? 'python' : 'python3';
+
+    const iou = iouThreshold !== undefined ? iouThreshold : 0.25;
+    const conf = confThreshold !== undefined ? confThreshold : 0.25;
+
+    const child = spawn(pythonExe, [pyScript, '--image', tempFile, '--iou', String(iou), '--conf', String(conf)]);
+
+    let stdoutData = '';
+    let stderrData = '';
+    let hasSentResponse = false;
+
+    child.on('error', (err) => {
+      if (hasSentResponse) return;
+      hasSentResponse = true;
+      try { if (fs.existsSync(tempFile)) fs.unlinkSync(tempFile); } catch (_) {}
+      console.warn("Python execution not available on this serverless runtime:", err.message);
+      return res.status(503).json({
+        error: "Python AI runtime not available on serverless instance",
+        details: "Vercel serverless functions run Node.js only. To run full YOLOv8 deep learning inference in production, host on Render, Railway, or Docker."
+      });
+    });
+
+    child.stdout.on('data', data => { stdoutData += data.toString(); });
+    child.stderr.on('data', data => { stderrData += data.toString(); });
+
+    child.on('close', code => {
+      if (hasSentResponse) return;
+      hasSentResponse = true;
+      // Clean up temp file
+      try { if (fs.existsSync(tempFile)) fs.unlinkSync(tempFile); } catch (_) {}
+
+      if (code !== 0) {
+        console.error("YOLO Detection Script error (code " + code + "):", stderrData);
+        return res.status(500).json({ error: "YOLO detection failed", details: stderrData });
+      }
+
+      try {
+        const jsonRes = JSON.parse(stdoutData.trim());
+        res.json(jsonRes);
+      } catch (err) {
+        console.error("Invalid JSON from YOLO detector:", stdoutData);
+        res.status(500).json({ error: "Invalid detector output", raw: stdoutData });
+      }
+    });
+  } catch (err) {
+    console.error("Vision API exception:", err);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // 10. POST /api/logs/clear: Wipe log entries

@@ -2,6 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
 const { Resend } = require('resend');
 const { spawn } = require('child_process');
 const db = require('./database');
@@ -327,9 +328,20 @@ app.post('/api/vision/detect', async (req, res) => {
     return res.status(400).json({ error: "Missing image data" });
   }
 
+  // Vercel Serverless Function runtime check:
+  // Vercel runs in Node.js serverless containers with no Python/PyTorch/YOLO environment
+  if (process.env.VERCEL) {
+    return res.status(503).json({
+      error: "Python AI runtime not available on Vercel serverless functions (Node.js runtime only).",
+      details: "Client automatically falls back to TensorFlow.js COCO-SSD + PerspectiveSeatNet in-browser.",
+      fallbackToClient: true
+    });
+  }
+
   try {
     const base64Data = imageBase64.replace(/^data:image\/\w+;base64,/, "");
-    const tempDir = path.join(__dirname, 'temp_vision');
+    // Use OS temporary directory to prevent EROFS read-only filesystem issues
+    const tempDir = path.join(os.tmpdir(), 'thapar_temp_vision');
     if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
 
     const tempFile = path.join(tempDir, `scan_${Date.now()}_${Math.random().toString(36).substring(7)}.jpg`);
@@ -351,10 +363,11 @@ app.post('/api/vision/detect', async (req, res) => {
       if (hasSentResponse) return;
       hasSentResponse = true;
       try { if (fs.existsSync(tempFile)) fs.unlinkSync(tempFile); } catch (_) {}
-      console.warn("Python execution not available on this serverless runtime:", err.message);
+      console.warn("Python execution not available on this runtime:", err.message);
       return res.status(503).json({
-        error: "Python AI runtime not available on serverless instance",
-        details: "Vercel serverless functions run Node.js only. To run full YOLOv8 deep learning inference in production, host on Render, Railway, or Docker."
+        error: "Python AI runtime not available on host",
+        details: err.message,
+        fallbackToClient: true
       });
     });
 
@@ -369,7 +382,11 @@ app.post('/api/vision/detect', async (req, res) => {
 
       if (code !== 0) {
         console.error("YOLO Detection Script error (code " + code + "):", stderrData);
-        return res.status(500).json({ error: "YOLO detection failed", details: stderrData });
+        return res.status(503).json({
+          error: "YOLO detection failed",
+          details: stderrData,
+          fallbackToClient: true
+        });
       }
 
       try {
@@ -377,12 +394,19 @@ app.post('/api/vision/detect', async (req, res) => {
         res.json(jsonRes);
       } catch (err) {
         console.error("Invalid JSON from YOLO detector:", stdoutData);
-        res.status(500).json({ error: "Invalid detector output", raw: stdoutData });
+        res.status(503).json({
+          error: "Invalid detector output",
+          raw: stdoutData,
+          fallbackToClient: true
+        });
       }
     });
   } catch (err) {
     console.error("Vision API exception:", err);
-    res.status(500).json({ error: err.message });
+    res.status(503).json({
+      error: err.message,
+      fallbackToClient: true
+    });
   }
 });
 

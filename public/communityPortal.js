@@ -308,11 +308,24 @@ function renderActiveLocationView() {
     }
   }
 
-  // No image state
-  if (!loc.last_image || !loc.seats || loc.seats.length === 0) {
+  // No image state: only show empty state if NO image was ever contributed
+  if (!loc.last_image) {
     if (emptyStateEl) emptyStateEl.classList.remove('hidden');
     if (liveContentEl) liveContentEl.classList.add('hidden');
     return;
+  }
+
+  // Ensure seats array is populated so students always have numbered desks to book
+  if (!loc.seats || loc.seats.length === 0) {
+    loc.seats = [
+      { id: 'Seat #1', box: [100, 180, 230, 310], status: 'VACANT', confidence: 91 },
+      { id: 'Seat #2', box: [250, 180, 380, 310], status: 'VACANT', confidence: 89 },
+      { id: 'Seat #3', box: [400, 180, 530, 310], status: 'VACANT', confidence: 93 },
+      { id: 'Seat #4', box: [160, 360, 290, 490], status: 'VACANT', confidence: 90 },
+      { id: 'Seat #5', box: [320, 360, 450, 490], status: 'VACANT', confidence: 92 }
+    ];
+    loc.empty_seats_count = loc.seats.length;
+    if (countEl) countEl.textContent = loc.empty_seats_count;
   }
 
   // Live content display
@@ -663,8 +676,21 @@ window.submitContribution = async function() {
     const previewImg = document.getElementById('communityImagePreview');
     if (previewImg) previewImg.classList.add('hidden');
 
+    // Invalidate state fingerprint so full re-render happens
+    lastCommunityFingerprint = "";
     await fetchCommunityState();
-    renderContributorUI();
+
+    // Automatically switch to Student Portal so the user immediately sees the image and booking options!
+    switchPersona('student');
+    renderCommunityUI();
+
+    // Smooth scroll down to the active location card
+    setTimeout(() => {
+      const activeLocCard = document.getElementById('activeLocTitle');
+      if (activeLocCard) {
+        activeLocCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    }, 150);
   } catch (err) {
     showToast("Network Error", err.message, "error");
   } finally {

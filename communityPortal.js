@@ -1,24 +1,33 @@
 /**
  * Community Crowdsourced Vision & Seat Allocation Engine
  * Supports 4 locations: CSED, Lib Ground, Lib 1st, Lib 2nd
- * Persona A: Contributor (Upload top-view photo, model numbers empty seats, earns Rs 3)
+ * Persona A: Contributor (Add an image, model numbers empty seats, earns Rs 3)
  * Persona B: Student (View numbered vacant seats, reserve seat for 10 mins with @thapar.edu ID)
  */
 
 const API_BASE = window.location.protocol.startsWith('http') ? '' : 'http://localhost:3000';
 
+const DEFAULT_LOCATIONS = [
+  { id: 'csed', name: 'CSED Building', icon: '💻', empty_seats_count: 0, seats: [], cooldown_until: 0, last_image: null },
+  { id: 'lib_ground', name: 'Library Ground Floor', icon: '📚', empty_seats_count: 0, seats: [], cooldown_until: 0, last_image: null },
+  { id: 'lib_floor1', name: 'Library 1st Floor', icon: '📖', empty_seats_count: 0, seats: [], cooldown_until: 0, last_image: null },
+  { id: 'lib_floor2', name: 'Library 2nd Floor', icon: '🤫', empty_seats_count: 0, seats: [], cooldown_until: 0, last_image: null }
+];
+
 const CommunityState = {
   activePersona: 'student', // 'student' or 'contributor'
   activeLocationId: 'csed',
-  locations: [],
+  locations: DEFAULT_LOCATIONS,
   activeBookings: [],
   totalDonations: 4250,
-  contributor: null, // { name, roll, email, wallet_balance, total_contributions }
+  contributor: null,
   selectedSeatForBooking: null,
-  cooldownTimerInterval: null
+  isInitialized: false
 };
 
-// 1. Initialize upon load
+let lastCommunityFingerprint = "";
+
+// 1. Initialize upon load (Instant zero-lag render without startup glitch)
 document.addEventListener('DOMContentLoaded', () => {
   // Load saved contributor session if exists
   const savedContrib = localStorage.getItem('thapar_contributor_user');
@@ -28,20 +37,27 @@ document.addEventListener('DOMContentLoaded', () => {
     } catch (_) {}
   }
 
-  // Load portal mode preference
+  // Ensure default mode is 'final'
   const savedMode = localStorage.getItem('thapar_portal_mode') || 'final';
-  switchPortalMode(savedMode);
+  switchPortalMode(savedMode, false);
 
-  // Initial fetch of community state
-  fetchCommunityState();
-  setInterval(fetchCommunityState, 4000); // Polling every 4s for live timers & seats
+  // Pre-render immediately with default state to eliminate startup flicker/jump
+  renderCommunityUI();
 
+  // Setup upload listeners once
   setupCommunityUpload();
+
+  // Initial fetch of community state from server
+  fetchCommunityState();
+
+  // Non-glitching interval: only diffs state, never wipes DOM unnecessarily
+  setInterval(fetchCommunityState, 3500);
+  setInterval(tickCooldownTimers, 1000);
 });
 
 // Mode Switcher (Final Submission Mode vs Classic Prototype)
-window.switchPortalMode = function(mode) {
-  localStorage.setItem('thapar_portal_mode', mode);
+window.switchPortalMode = function(mode, savePref = true) {
+  if (savePref) localStorage.setItem('thapar_portal_mode', mode);
   const finalView = document.getElementById('finalSubmissionView');
   const classicView = document.getElementById('classicPrototypeView');
   const btnFinal = document.getElementById('toggleFinalModeBtn');
@@ -52,20 +68,26 @@ window.switchPortalMode = function(mode) {
     if (classicView) classicView.classList.add('hidden');
     
     if (btnFinal) {
-      btnFinal.className = "px-4 py-1.5 rounded-lg transition-all bg-thapar-red text-white shadow-sm font-bold flex items-center gap-1.5";
+      btnFinal.className = "px-4 py-2 rounded-lg transition-all bg-thapar-red text-white shadow-sm font-bold flex items-center gap-1.5";
     }
     if (btnClassic) {
-      btnClassic.className = "px-4 py-1.5 rounded-lg transition-all text-slate-600 hover:text-slate-900 flex items-center gap-1.5";
+      btnClassic.className = "px-4 py-2 rounded-lg transition-all text-slate-600 hover:text-slate-900 flex items-center gap-1.5";
     }
   } else {
     if (finalView) finalView.classList.add('hidden');
     if (classicView) classicView.classList.remove('hidden');
     
     if (btnFinal) {
-      btnFinal.className = "px-4 py-1.5 rounded-lg transition-all text-slate-600 hover:text-slate-900 flex items-center gap-1.5";
+      btnFinal.className = "px-4 py-2 rounded-lg transition-all text-slate-600 hover:text-slate-900 flex items-center gap-1.5";
     }
     if (btnClassic) {
-      btnClassic.className = "px-4 py-1.5 rounded-lg transition-all bg-slate-900 text-white shadow-sm font-bold flex items-center gap-1.5";
+      btnClassic.className = "px-4 py-2 rounded-lg transition-all bg-slate-900 text-white shadow-sm font-bold flex items-center gap-1.5";
+    }
+
+    // Lazy load classic seat vision if not already initialized
+    if (!window.classicSeatVisionLoaded && window.initSeatVision) {
+      window.classicSeatVisionLoaded = true;
+      window.initSeatVision();
     }
   }
 };
@@ -85,56 +107,112 @@ window.switchPersona = function(persona) {
     if (contribSection) contribSection.classList.add('hidden');
 
     if (btnStudent) {
-      btnStudent.className = "px-5 py-2.5 rounded-xl font-mono text-xs font-bold transition-all bg-white text-slate-900 shadow-sm border border-slate-200 flex items-center gap-2";
+      btnStudent.className = "flex-1 md:flex-none px-5 py-2.5 rounded-xl font-mono text-xs font-bold transition-all bg-white text-slate-900 shadow-sm border border-slate-200 flex items-center justify-center gap-2";
     }
     if (btnContrib) {
-      btnContrib.className = "px-5 py-2.5 rounded-xl font-mono text-xs font-bold transition-all text-slate-600 hover:text-slate-900 flex items-center gap-2";
+      btnContrib.className = "flex-1 md:flex-none px-5 py-2.5 rounded-xl font-mono text-xs font-bold transition-all text-slate-600 hover:text-slate-900 flex items-center justify-center gap-2";
     }
 
     if (title) title.textContent = "🎓 Student Portal • Find & Reserve Live Empty Seats";
-    if (subtitle) subtitle.textContent = "Browse crowdsourced top-view campus photos, see numbered vacant desks, and reserve with your @thapar.edu ID.";
+    if (subtitle) subtitle.textContent = "Browse live campus photos, see numbered vacant desks, and reserve with your @thapar.edu ID.";
   } else {
     if (studentSection) studentSection.classList.add('hidden');
     if (contribSection) contribSection.classList.remove('hidden');
 
     if (btnStudent) {
-      btnStudent.className = "px-5 py-2.5 rounded-xl font-mono text-xs font-bold transition-all text-slate-600 hover:text-slate-900 flex items-center gap-2";
+      btnStudent.className = "flex-1 md:flex-none px-5 py-2.5 rounded-xl font-mono text-xs font-bold transition-all text-slate-600 hover:text-slate-900 flex items-center justify-center gap-2";
     }
     if (btnContrib) {
-      btnContrib.className = "px-5 py-2.5 rounded-xl font-mono text-xs font-bold transition-all bg-emerald-600 text-white shadow-sm flex items-center gap-2";
+      btnContrib.className = "flex-1 md:flex-none px-5 py-2.5 rounded-xl font-mono text-xs font-bold transition-all bg-emerald-600 text-white shadow-sm flex items-center justify-center gap-2";
     }
 
-    if (title) title.textContent = "📸 Contributor Portal • Upload Top-View Photos & Earn ₹3";
-    if (subtitle) subtitle.textContent = "Snap and contribute a fresh top-view hall photo to help peers find seats. Earn ₹3 into your purse for every verified upload.";
+    if (title) title.textContent = "📸 Contributor Portal • Add an Image & Earn ₹3";
+    if (subtitle) subtitle.textContent = "Snap and add a fresh hall image to help peers find seats. Earn ₹3 into your purse for every verified upload.";
 
     renderContributorUI();
   }
 };
 
-// Fetch State from Server
+// Fetch State from Server with Diff Caching (Prevents Startup Stutter & Flickers)
 async function fetchCommunityState() {
   try {
     const res = await fetch(API_BASE + '/api/community/state');
     if (!res.ok) return;
     const data = await res.json();
     
+    // Create state fingerprint to determine if anything actually changed
+    const fingerprint = JSON.stringify({
+      locs: (data.locations || []).map(l => ({
+        id: l.id,
+        c: l.empty_seats_count,
+        cd: l.isCooldownActive,
+        img: (l.last_image ? l.last_image.substring(0, 30) : '')
+      })),
+      bLen: (data.activeBookings || []).length,
+      don: data.totalDonations
+    });
+
+    const hasChanged = (fingerprint !== lastCommunityFingerprint);
+    lastCommunityFingerprint = fingerprint;
+
     CommunityState.locations = data.locations || [];
     CommunityState.activeBookings = data.activeBookings || [];
     CommunityState.totalDonations = data.totalDonations || 4250;
 
-    renderCommunityUI();
+    // Only perform full DOM re-renders if data truly changed or first load
+    if (hasChanged || !CommunityState.isInitialized) {
+      CommunityState.isInitialized = true;
+      renderCommunityUI();
+    }
   } catch (err) {
     console.warn("Failed to fetch community state:", err);
   }
 }
 
-// Render Master UI
+// Master UI Render
 function renderCommunityUI() {
   renderLocationTabs();
   renderActiveLocationView();
   renderDonationSection();
   if (CommunityState.activePersona === 'contributor') {
     renderContributorUI();
+  }
+}
+
+// 1-Sec Tick for Cooldown Countdown (Updates text in-place without re-rendering DOM)
+function tickCooldownTimers() {
+  const loc = CommunityState.locations.find(l => l.id === CommunityState.activeLocationId);
+  if (!loc) return;
+
+  if (loc.cooldown_until && loc.cooldown_until > Date.now()) {
+    const secondsLeft = Math.max(0, Math.ceil((loc.cooldown_until - Date.now()) / 1000));
+    const mins = Math.floor(secondsLeft / 60);
+    const secs = String(secondsLeft % 60).padStart(2, '0');
+    const timeStr = `${mins}:${secs}`;
+
+    const studentCooldown = document.getElementById('activeLocCooldownBanner');
+    if (studentCooldown) {
+      studentCooldown.classList.remove('hidden');
+      const timeSpan = studentCooldown.querySelector('.cooldown-time-val');
+      if (timeSpan) timeSpan.textContent = timeStr;
+    }
+
+    const contribLockTimer = document.getElementById('contribLockTimerText');
+    if (contribLockTimer) {
+      contribLockTimer.textContent = `${timeStr} remaining until next contribution opens`;
+    }
+  } else {
+    // Cooldown ended
+    const studentCooldown = document.getElementById('activeLocCooldownBanner');
+    if (studentCooldown && !studentCooldown.classList.contains('hidden')) {
+      studentCooldown.classList.add('hidden');
+    }
+    const contribLockBox = document.getElementById('contribCooldownLockBox');
+    const contribUploadForm = document.getElementById('contribUploadForm');
+    if (contribLockBox && !contribLockBox.classList.contains('hidden')) {
+      contribLockBox.classList.add('hidden');
+      if (contribUploadForm) contribUploadForm.classList.remove('hidden');
+    }
   }
 }
 
@@ -156,7 +234,7 @@ function renderLocationTabs() {
     const isSelected = CommunityState.activeLocationId === l.id;
 
     const activeClass = isSelected
-      ? "bg-thapar-red text-white border-thapar-red shadow-md scale-102"
+      ? "bg-thapar-red text-white border-thapar-red shadow-md ring-2 ring-thapar-red/20"
       : "bg-white text-slate-700 border-slate-200 hover:border-slate-300 hover:bg-slate-50";
 
     const badgeClass = isSelected
@@ -168,12 +246,12 @@ function renderLocationTabs() {
         <div class="flex items-center justify-between">
           <span class="text-base">${l.icon}</span>
           <span class="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full ${badgeClass}">
-            ${vacantCount > 0 ? `${vacantCount} Vacant` : 'No Live Photo'}
+            ${vacantCount > 0 ? `${vacantCount} Vacant` : 'No Image Yet'}
           </span>
         </div>
         <div>
           <span class="text-xs font-mono font-bold block leading-tight">${l.name}</span>
-          <span class="text-[10px] opacity-75 font-mono">Top-View Neural Grid</span>
+          <span class="text-[10px] opacity-75 font-mono">Live Detection Grid</span>
         </div>
       </button>
     `;
@@ -210,17 +288,19 @@ function renderActiveLocationView() {
       const minsAgo = Math.max(1, Math.round((Date.now() - loc.last_updated_at) / 60000));
       metaEl.innerHTML = `Photo contributed by <strong class="text-slate-700">${loc.contributor_name}</strong> (${loc.contributor_roll}) &bull; ${minsAgo}m ago`;
     } else {
-      metaEl.textContent = "Awaiting first top-view photo upload from community contributor";
+      metaEl.textContent = "Awaiting first image upload from community contributor";
     }
   }
 
   // Cooldown status
   if (cooldownEl) {
     if (loc.isCooldownActive) {
-      const mins = Math.ceil(loc.cooldownSecondsLeft / 60);
+      const secondsLeft = Math.max(0, Math.ceil((loc.cooldown_until - Date.now()) / 1000));
+      const mins = Math.floor(secondsLeft / 60);
+      const secs = String(secondsLeft % 60).padStart(2, '0');
       cooldownEl.innerHTML = `
-        <span class="w-2 h-2 rounded-full bg-amber-500 animate-ping mr-1.5"></span>
-        <span>Cooldown active: Next community photo update opens in <strong>${mins}m</strong> (Photos update in 10-min windows)</span>
+        <span class="w-2 h-2 rounded-full bg-amber-500 animate-ping mr-2"></span>
+        <span>Cooldown active: Next community photo update opens in <strong class="cooldown-time-val">${mins}:${secs}</strong> (Images refresh in 10-min windows)</span>
       `;
       cooldownEl.classList.remove('hidden');
     } else {
@@ -240,14 +320,14 @@ function renderActiveLocationView() {
   if (liveContentEl) liveContentEl.classList.remove('hidden');
 
   // Render Canvas with numbered boxes
-  drawTopViewCanvas(loc);
+  drawCanvasWithBoxes(loc);
 
   // Render clickable seat cards
   renderSeatBookingGrid(loc);
 }
 
-// Draw Top View Image with Numbered Empty Seat Boxes
-function drawTopViewCanvas(loc) {
+// Draw Image with Numbered Empty Seat Boxes
+function drawCanvasWithBoxes(loc) {
   const canvas = document.getElementById('topViewCanvas');
   if (!canvas) return;
   const ctx = canvas.getContext('2d');
@@ -494,8 +574,10 @@ function renderContributorUploadBox() {
   if (loc.isCooldownActive) {
     if (lockEl) lockEl.classList.remove('hidden');
     if (formEl) formEl.classList.add('hidden');
-    const mins = Math.ceil(loc.cooldownSecondsLeft / 60);
-    if (lockTimerEl) lockTimerEl.textContent = `${mins} minute(s) remaining until next contribution opens`;
+    const secondsLeft = Math.max(0, Math.ceil((loc.cooldown_until - Date.now()) / 1000));
+    const mins = Math.floor(secondsLeft / 60);
+    const secs = String(secondsLeft % 60).padStart(2, '0');
+    if (lockTimerEl) lockTimerEl.textContent = `${mins}:${secs} remaining until next contribution opens`;
   } else {
     if (lockEl) lockEl.classList.add('hidden');
     if (formEl) formEl.classList.remove('hidden');
@@ -536,9 +618,10 @@ function setupCommunityUpload() {
   }
 }
 
-window.submitTopViewContribution = async function() {
+window.submitTopViewContribution = function() { window.submitContribution(); };
+window.submitContribution = async function() {
   if (!activeUploadBase64) {
-    showToast("No Image Selected", "Please select or drop a top-view photo first.", "error");
+    showToast("No Image Selected", "Please select or drop an image first.", "error");
     return;
   }
   if (!CommunityState.contributor) {
@@ -548,7 +631,7 @@ window.submitTopViewContribution = async function() {
 
   const btn = document.getElementById('btnSubmitContribution');
   btn.disabled = true;
-  btn.textContent = "⚡ Running best.pt Model & Numbering Seats...";
+  btn.textContent = "⚡ Running Model & Numbering Seats...";
 
   try {
     const res = await fetch(API_BASE + '/api/community/contribute', {

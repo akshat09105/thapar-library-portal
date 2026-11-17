@@ -210,6 +210,32 @@ function initSchema() {
   if (seatCount === 0) {
     seedDatabase();
   }
+
+  // Seed community locations if empty
+  const commLocCount = db.prepare('SELECT COUNT(*) as count FROM community_locations').get().count;
+  if (commLocCount === 0) {
+    seedCommunityLocations();
+  }
+}
+
+// Seed 4 Monitored Community Locations
+function seedCommunityLocations() {
+  const insertLoc = db.prepare(`
+    INSERT INTO community_locations (id, name, last_image, empty_seats_count, seats_json, last_updated_at, cooldown_until, contributor_name, contributor_roll)
+    VALUES (?, ?, NULL, 0, '[]', 0, 0, NULL, NULL)
+  `);
+  const initialLocations = [
+    { id: 'csed', name: 'CSED Building' },
+    { id: 'lib_ground', name: 'Library Ground Floor' },
+    { id: 'lib_floor1', name: 'Library 1st Floor' },
+    { id: 'lib_floor2', name: 'Library 2nd Floor' }
+  ];
+  const tx = db.transaction(() => {
+    for (const loc of initialLocations) {
+      insertLoc.run(loc.id, loc.name);
+    }
+  });
+  tx();
 }
 
 // 2. Database Seeder

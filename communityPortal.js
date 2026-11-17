@@ -315,18 +315,8 @@ function renderActiveLocationView() {
     return;
   }
 
-  // Ensure seats array is populated so students always have numbered desks to book
-  if (!loc.seats || loc.seats.length === 0) {
-    loc.seats = [
-      { id: 'Seat #1', box: [100, 180, 230, 310], status: 'VACANT', confidence: 91 },
-      { id: 'Seat #2', box: [250, 180, 380, 310], status: 'VACANT', confidence: 89 },
-      { id: 'Seat #3', box: [400, 180, 530, 310], status: 'VACANT', confidence: 93 },
-      { id: 'Seat #4', box: [160, 360, 290, 490], status: 'VACANT', confidence: 90 },
-      { id: 'Seat #5', box: [320, 360, 450, 490], status: 'VACANT', confidence: 92 }
-    ];
-    loc.empty_seats_count = loc.seats.length;
-    if (countEl) countEl.textContent = loc.empty_seats_count;
-  }
+  // If no vacant seats were detected by model
+  if (!loc.seats) loc.seats = [];
 
   // Live content display
   if (emptyStateEl) emptyStateEl.classList.add('hidden');

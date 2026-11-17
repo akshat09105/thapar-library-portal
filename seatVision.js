@@ -518,6 +518,8 @@ function updateMetricsUI() {
 function renderSeatTable(seats) {
   const tbody = document.getElementById('seatInventoryTableBody');
   if (!tbody) return;
+  const tableContainer = tbody.closest('.overflow-x-auto');
+  const prevScrollTop = tableContainer ? tableContainer.scrollTop : 0;
 
   if (!seats || seats.length === 0) {
     tbody.innerHTML = `<tr><td colspan="5" class="py-4 text-center text-slate-400">No seats detected in camera view</td></tr>`;
@@ -556,6 +558,7 @@ function renderSeatTable(seats) {
   }).join('');
 
   tbody.innerHTML = html;
+  if (tableContainer) tableContainer.scrollTop = prevScrollTop;
 }
 
 // Handle Custom User-Uploaded Side-Angled Images

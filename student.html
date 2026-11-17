@@ -32,12 +32,27 @@
   </script>
   
   <style>
+    html {
+      scroll-behavior: smooth;
+      overflow-x: hidden;
+    }
     body {
       background-color: #F8FAFC;
+      position: relative;
+      overflow-x: hidden;
+    }
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      z-index: -1;
       background-image: 
         radial-gradient(at 0% 0%, rgba(200, 16, 46, 0.03) 0px, transparent 50%),
         radial-gradient(at 100% 100%, rgba(30, 41, 59, 0.02) 0px, transparent 50%);
-      background-attachment: fixed;
+      pointer-events: none;
+    }
+    #activeZoneLayoutCard {
+      scroll-margin-top: 2rem;
     }
     
     /* Custom Scrollbar */
@@ -412,10 +427,22 @@
     let demoSpeed = false;
 
     // Load from Server API
+    let lastStudentStateHash = "";
     async function loadData() {
       try {
         const res = await fetch(API_BASE + '/api/state');
         const state = await res.json();
+        
+        // Fingerprint state to only re-render if data actually changed
+        const currentHash = JSON.stringify({
+          s: state.seats,
+          b: (state.bookings || []).map(x => ({ id: x.id, s: x.status, st: x.studentId, e: x.expiresAt })),
+          eLen: (state.emails || []).length,
+          speed: state.demoSpeed
+        });
+        const hasChanged = (currentHash !== lastStudentStateHash);
+        lastStudentStateHash = currentHash;
+
         seats = state.seats;
         bookings = state.bookings;
         logs = state.logs;
@@ -424,7 +451,10 @@
         if (state.serverTime) {
           window.serverTimeOffset = state.serverTime - Date.now();
         }
-        renderAll();
+
+        if (hasChanged) {
+          renderAll();
+        }
       } catch (err) {
         console.error("Failed to fetch state from API server:", err);
       }
@@ -979,7 +1009,19 @@
     window.closeStudentInspectModal = function() {
       document.getElementById("studentSeatInspectModal").classList.add("hidden");
       document.getElementById("studentSeatInspectModal").classList.remove("flex");
+      document.body.style.overflow = "";
     };
+
+    // Close modal on backdrop click & Escape
+    const studentModalEl = document.getElementById("studentSeatInspectModal");
+    if (studentModalEl) {
+      studentModalEl.addEventListener("click", (e) => {
+        if (e.target === studentModalEl) window.closeStudentInspectModal();
+      });
+    }
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") window.closeStudentInspectModal();
+    });
 
     window.reportGhostBooking = async function(seatId, zoneKey) {
       if (!currentUser) return;

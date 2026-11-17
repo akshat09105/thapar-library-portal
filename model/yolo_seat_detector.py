@@ -113,7 +113,51 @@ def analyze_image(image_path, iou_thresh=0.25, conf_thresh=0.25):
     except ImportError:
         return {"error": "Ultralytics is not installed. Run: pip install ultralytics"}
 
-    # Locate yolov8n.pt
+    # Check if custom top-view model (best.pt) is present
+    custom_model_path = Path(__file__).parent / "best.pt"
+    if not custom_model_path.exists():
+        custom_model_path = Path(__file__).parent.parent / "best.pt"
+
+    if custom_model_path.exists():
+        custom_model = YOLO(str(custom_model_path))
+        # If model is specifically trained for unoccupied / empty seats
+        if 0 in custom_model.names and "unoccupied" in str(custom_model.names[0]).lower():
+            results = custom_model.predict(source=image_path, imgsz=640, conf=conf_thresh, verbose=False)
+            if not results or len(results) == 0:
+                return {"success": True, "totalSeats": 0, "emptySeats": 0, "occupiedSeats": 0, "occupancyRate": "0%", "seats": [], "persons": [], "belongings": []}
+            res = results[0]
+            orig_w, orig_h = res.orig_shape[1], res.orig_shape[0]
+            boxes = res.boxes
+            seats = []
+            for idx, b in enumerate(boxes):
+                xyxy = [int(v) for v in b.xyxy[0].tolist()]
+                conf = float(b.conf[0].item())
+                seats.append({
+                    "id": f"S-{idx + 1}",
+                    "box": xyxy,
+                    "row": "Top-View Empty Seat",
+                    "status": "VACANT",
+                    "confidence": round(conf * 100, 1),
+                    "occupantType": "none",
+                    "iou": 0.0
+                })
+            seats.sort(key=lambda s: s["box"][0])
+            for i, s in enumerate(seats):
+                s["id"] = f"S-{i + 1}"
+            empty_count = len(seats)
+            return {
+                "success": True,
+                "totalSeats": empty_count,
+                "emptySeats": empty_count,
+                "occupiedSeats": 0,
+                "occupancyRate": "0%",
+                "seats": seats,
+                "persons": [],
+                "belongings": [],
+                "imageDimensions": {"width": orig_w, "height": orig_h}
+            }
+
+    # Otherwise fallback to general yolov8n.pt
     model_path = Path(__file__).parent.parent / "yolov8n.pt"
     if not model_path.exists():
         model_path = "yolov8n.pt"

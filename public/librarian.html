@@ -371,10 +371,21 @@
     const stats = { active: 0, pending: 0, grace: 0, instant: 0 };
 
     // Synchronize state with Server API
+    let lastLibrarianStateHash = "";
     async function loadData() {
       try {
         const res = await fetch(API_BASE + '/api/state');
         const state = await res.json();
+        
+        const currentHash = JSON.stringify({
+          s: state.seats,
+          b: (state.bookings || []).map(x => ({ id: x.id, s: x.status })),
+          lLen: (state.logs || []).length,
+          rLen: (state.reports || []).length
+        });
+        const hasChanged = (currentHash !== lastLibrarianStateHash);
+        lastLibrarianStateHash = currentHash;
+
         seats = state.seats;
         bookings = state.bookings;
         logs = state.logs;
@@ -386,7 +397,9 @@
         stats.pending = bookings.filter(b => b.status === "pending_claim").length;
         stats.grace = bookings.filter(b => b.status === "grace").length;
         
-        renderAll();
+        if (hasChanged) {
+          renderAll();
+        }
       } catch (err) {
         console.error("Failed to load state from server API:", err);
       }
@@ -662,6 +675,7 @@
     function renderLogs() {
       const list = document.getElementById("staffLogsList");
       if (!list) return;
+      const prevScrollTop = list.scrollTop;
       list.innerHTML = "";
       
       logs.forEach(log => {
@@ -676,6 +690,7 @@
           </div>
         `;
       });
+      list.scrollTop = prevScrollTop;
     }
 
     // Render reports in inbox queue list

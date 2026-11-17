@@ -138,6 +138,55 @@ function initSchema() {
       timestamp INTEGER NOT NULL
     );
 
+    -- Community Crowdsourced Vision & Bounties
+    CREATE TABLE IF NOT EXISTS community_locations (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      last_image TEXT,
+      empty_seats_count INTEGER DEFAULT 0,
+      seats_json TEXT,
+      last_updated_at INTEGER DEFAULT 0,
+      cooldown_until INTEGER DEFAULT 0,
+      contributor_name TEXT,
+      contributor_roll TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS community_contributors (
+      roll_number TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      email TEXT NOT NULL,
+      wallet_balance REAL DEFAULT 0.0,
+      total_contributions INTEGER DEFAULT 0,
+      created_at INTEGER
+    );
+
+    CREATE TABLE IF NOT EXISTS community_contributions_log (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      roll_number TEXT NOT NULL,
+      location_id TEXT NOT NULL,
+      empty_seats_found INTEGER NOT NULL,
+      reward_amount REAL DEFAULT 3.0,
+      timestamp INTEGER NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS community_bookings (
+      id TEXT PRIMARY KEY,
+      location_id TEXT NOT NULL,
+      seat_number TEXT NOT NULL,
+      student_roll TEXT NOT NULL,
+      student_email TEXT NOT NULL,
+      booked_at INTEGER NOT NULL,
+      expires_at INTEGER NOT NULL,
+      status TEXT NOT NULL DEFAULT 'ACTIVE'
+    );
+
+    CREATE TABLE IF NOT EXISTS community_donations (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      donor_name TEXT NOT NULL,
+      amount REAL NOT NULL,
+      created_at INTEGER NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS otps (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       email TEXT NOT NULL,
@@ -900,7 +949,176 @@ function verifyOtp({ email, roll, otp }) {
 // Initialize database schema upon module load
 initSchema();
 
+// -------------------------------------------------------------
+// Crowdsourced Community Vision, Bounties, & Allocation Engine
+// -------------------------------------------------------------
+
+function getCommunityState() {
+  const now = Date.now();
+  
+  // Auto-expire bookings older than 10 mins
+  const expired = db.prepare(`SELECT * FROM community_bookings WHERE status = 'ACTIVE' AND expires_at <= ?`).all(now);
+  for (const b of expired) {
+    db.prepare(`UPDATE community_bookings SET status = 'EXPIRED' WHERE id = ?`).run(b.id);
+    const loc = db.prepare(`SELECT * FROM community_locations WHERE id = ?`).get(b.location_id);
+    if (loc && loc.seats_json) {
+      try {
+        const seats = JSON.parse(loc.seats_json);
+        let changed = false;
+        seats.forEach(s => {
+          if (s.id === b.seat_number && s.status === 'BOOKED') {
+            s.status = 'VACANT';
+            delete s.bookedBy;
+            delete s.expiresAt;
+            changed = true;
+          }
+        });
+        if (changed) {
+          const vCount = seats.filter(s => s.status === 'VACANT').length;
+          db.prepare(`UPDATE community_locations SET seats_json = ?, empty_seats_count = ? WHERE id = ?`)
+            .run(JSON.stringify(seats), vCount, b.location_id);
+        }
+      } catch (_) {}
+    }
+  }
+
+  const locations = db.prepare(`SELECT * FROM community_locations`).all();
+  const activeBookings = db.prepare(`SELECT * FROM community_bookings WHERE status = 'ACTIVE'`).all();
+  const donations = db.prepare(`SELECT * FROM community_donations ORDER BY id DESC LIMIT 10`).all();
+  const donSum = db.prepare(`SELECT SUM(amount) as total FROM community_donations`).get()?.total || 0;
+
+  return {
+    locations: locations.map(l => ({
+      ...l,
+      seats: l.seats_json ? JSON.parse(l.seats_json) : [],
+      isCooldownActive: l.cooldown_until > now,
+      cooldownSecondsLeft: Math.max(0, Math.ceil((l.cooldown_until - now) / 1000))
+    })),
+    activeBookings,
+    donations,
+    totalDonations: Math.round(donSum + 4250) // Baseline community pool
+  };
+}
+
+function authContributor(name, roll, email) {
+  const cleanRoll = String(roll).trim();
+  const cleanEmail = String(email).trim().toLowerCase();
+  const cleanName = String(name || 'Contributor').trim();
+
+  let contributor = db.prepare(`SELECT * FROM community_contributors WHERE roll_number = ?`).get(cleanRoll);
+  if (!contributor) {
+    db.prepare(`
+      INSERT INTO community_contributors (roll_number, name, email, wallet_balance, total_contributions, created_at)
+      VALUES (?, ?, ?, 0.0, 0, ?)
+    `).run(cleanRoll, cleanName, cleanEmail, Date.now());
+    contributor = db.prepare(`SELECT * FROM community_contributors WHERE roll_number = ?`).get(cleanRoll);
+  }
+  return contributor;
+}
+
+function updateCommunityLocation(locationId, { imageBase64, seats, emptySeatsCount, contributorName, contributorRoll }) {
+  const now = Date.now();
+  const cooldownUntil = now + (10 * 60 * 1000); // 10-minute cooldown
+
+  db.prepare(`
+    UPDATE community_locations
+    SET last_image = ?, empty_seats_count = ?, seats_json = ?, last_updated_at = ?, cooldown_until = ?, contributor_name = ?, contributor_roll = ?
+    WHERE id = ?
+  `).run(imageBase64, emptySeatsCount, JSON.stringify(seats), now, cooldownUntil, contributorName, contributorRoll, locationId);
+
+  // Credit Rs 3 to contributor's purse
+  db.prepare(`
+    UPDATE community_contributors 
+    SET wallet_balance = wallet_balance + 3.0, total_contributions = total_contributions + 1
+    WHERE roll_number = ?
+  `).run(contributorRoll);
+
+  // Log contribution
+  db.prepare(`
+    INSERT INTO community_contributions_log (roll_number, location_id, empty_seats_found, reward_amount, timestamp)
+    VALUES (?, ?, ?, 3.0, ?)
+  `).run(contributorRoll, locationId, emptySeatsCount, now);
+
+  const updatedContrib = db.prepare(`SELECT * FROM community_contributors WHERE roll_number = ?`).get(contributorRoll);
+  const updatedLoc = db.prepare(`SELECT * FROM community_locations WHERE id = ?`).get(locationId);
+
+  return {
+    location: updatedLoc,
+    contributor: updatedContrib
+  };
+}
+
+function bookCommunitySeat(locationId, seatNumber, studentRoll, studentEmail) {
+  const now = Date.now();
+  const expiresAt = now + (10 * 60 * 1000); // 10 minutes duration
+
+  const loc = db.prepare(`SELECT * FROM community_locations WHERE id = ?`).get(locationId);
+  if (!loc || !loc.seats_json) {
+    return { success: false, error: "Location has no active seats." };
+  }
+
+  const seats = JSON.parse(loc.seats_json);
+  const targetSeat = seats.find(s => s.id === seatNumber);
+  if (!targetSeat) {
+    return { success: false, error: "Seat not found." };
+  }
+  if (targetSeat.status === 'BOOKED') {
+    return { success: false, error: "This seat is already booked." };
+  }
+
+  const existing = db.prepare(`SELECT * FROM community_bookings WHERE student_roll = ? AND status = 'ACTIVE' AND expires_at > ?`).get(studentRoll, now);
+  if (existing) {
+    return { success: false, error: `You already have an active booking for ${existing.seat_number} at ${existing.location_id.toUpperCase()}. Please arrive and occupy.` };
+  }
+
+  targetSeat.status = 'BOOKED';
+  targetSeat.bookedBy = studentRoll;
+  targetSeat.expiresAt = expiresAt;
+
+  const vacantCount = seats.filter(s => s.status === 'VACANT').length;
+  const bookingId = `CB-${Date.now().toString(36).toUpperCase()}`;
+
+  db.transaction(() => {
+    db.prepare(`UPDATE community_locations SET seats_json = ?, empty_seats_count = ? WHERE id = ?`)
+      .run(JSON.stringify(seats), vacantCount, locationId);
+
+    db.prepare(`
+      INSERT INTO community_bookings (id, location_id, seat_number, student_roll, student_email, booked_at, expires_at, status)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 'ACTIVE')
+    `).run(bookingId, locationId, seatNumber, studentRoll, studentEmail, now, expiresAt);
+  })();
+
+  return {
+    success: true,
+    bookingId,
+    locationId,
+    seatNumber,
+    expiresAt,
+    remainingMinutes: 10
+  };
+}
+
+function addCommunityDonation(donorName, amount) {
+  const cleanName = (donorName || 'Generous Thaparian').trim();
+  const cleanAmount = Math.max(1, parseFloat(amount) || 50);
+
+  db.prepare(`
+    INSERT INTO community_donations (donor_name, amount, created_at)
+    VALUES (?, ?, ?)
+  `).run(cleanName, cleanAmount, Date.now());
+
+  const total = db.prepare(`SELECT SUM(amount) as total FROM community_donations`).get()?.total || 0;
+  return { success: true, donorName: cleanName, amount: cleanAmount, totalDonations: Math.round(total + 4250) };
+}
+
+
 module.exports = {
+  getCommunityState,
+  authContributor,
+  updateCommunityLocation,
+  bookCommunitySeat,
+  addCommunityDonation,
+
   FLOORS,
   readState,
   appendLog,

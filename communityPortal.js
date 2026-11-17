@@ -1,0 +1,668 @@
+/**
+ * Community Crowdsourced Vision & Seat Allocation Engine
+ * Supports 4 locations: CSED, Lib Ground, Lib 1st, Lib 2nd
+ * Persona A: Contributor (Upload top-view photo, model numbers empty seats, earns Rs 3)
+ * Persona B: Student (View numbered vacant seats, reserve seat for 10 mins with @thapar.edu ID)
+ */
+
+const API_BASE = window.location.protocol.startsWith('http') ? '' : 'http://localhost:3000';
+
+const CommunityState = {
+  activePersona: 'student', // 'student' or 'contributor'
+  activeLocationId: 'csed',
+  locations: [],
+  activeBookings: [],
+  totalDonations: 4250,
+  contributor: null, // { name, roll, email, wallet_balance, total_contributions }
+  selectedSeatForBooking: null,
+  cooldownTimerInterval: null
+};
+
+// 1. Initialize upon load
+document.addEventListener('DOMContentLoaded', () => {
+  // Load saved contributor session if exists
+  const savedContrib = localStorage.getItem('thapar_contributor_user');
+  if (savedContrib) {
+    try {
+      CommunityState.contributor = JSON.parse(savedContrib);
+    } catch (_) {}
+  }
+
+  // Load portal mode preference
+  const savedMode = localStorage.getItem('thapar_portal_mode') || 'final';
+  switchPortalMode(savedMode);
+
+  // Initial fetch of community state
+  fetchCommunityState();
+  setInterval(fetchCommunityState, 4000); // Polling every 4s for live timers & seats
+
+  setupCommunityUpload();
+});
+
+// Mode Switcher (Final Submission Mode vs Classic Prototype)
+window.switchPortalMode = function(mode) {
+  localStorage.setItem('thapar_portal_mode', mode);
+  const finalView = document.getElementById('finalSubmissionView');
+  const classicView = document.getElementById('classicPrototypeView');
+  const btnFinal = document.getElementById('toggleFinalModeBtn');
+  const btnClassic = document.getElementById('toggleClassicModeBtn');
+
+  if (mode === 'final') {
+    if (finalView) finalView.classList.remove('hidden');
+    if (classicView) classicView.classList.add('hidden');
+    
+    if (btnFinal) {
+      btnFinal.className = "px-4 py-1.5 rounded-lg transition-all bg-thapar-red text-white shadow-sm font-bold flex items-center gap-1.5";
+    }
+    if (btnClassic) {
+      btnClassic.className = "px-4 py-1.5 rounded-lg transition-all text-slate-600 hover:text-slate-900 flex items-center gap-1.5";
+    }
+  } else {
+    if (finalView) finalView.classList.add('hidden');
+    if (classicView) classicView.classList.remove('hidden');
+    
+    if (btnFinal) {
+      btnFinal.className = "px-4 py-1.5 rounded-lg transition-all text-slate-600 hover:text-slate-900 flex items-center gap-1.5";
+    }
+    if (btnClassic) {
+      btnClassic.className = "px-4 py-1.5 rounded-lg transition-all bg-slate-900 text-white shadow-sm font-bold flex items-center gap-1.5";
+    }
+  }
+};
+
+// Persona Switcher (Student vs Contributor)
+window.switchPersona = function(persona) {
+  CommunityState.activePersona = persona;
+  const studentSection = document.getElementById('studentPersonaSection');
+  const contribSection = document.getElementById('contributorPersonaSection');
+  const btnStudent = document.getElementById('roleStudentBtn');
+  const btnContrib = document.getElementById('roleContributorBtn');
+  const title = document.getElementById('finalPersonaTitle');
+  const subtitle = document.getElementById('finalPersonaSubtitle');
+
+  if (persona === 'student') {
+    if (studentSection) studentSection.classList.remove('hidden');
+    if (contribSection) contribSection.classList.add('hidden');
+
+    if (btnStudent) {
+      btnStudent.className = "px-5 py-2.5 rounded-xl font-mono text-xs font-bold transition-all bg-white text-slate-900 shadow-sm border border-slate-200 flex items-center gap-2";
+    }
+    if (btnContrib) {
+      btnContrib.className = "px-5 py-2.5 rounded-xl font-mono text-xs font-bold transition-all text-slate-600 hover:text-slate-900 flex items-center gap-2";
+    }
+
+    if (title) title.textContent = "🎓 Student Portal • Find & Reserve Live Empty Seats";
+    if (subtitle) subtitle.textContent = "Browse crowdsourced top-view campus photos, see numbered vacant desks, and reserve with your @thapar.edu ID.";
+  } else {
+    if (studentSection) studentSection.classList.add('hidden');
+    if (contribSection) contribSection.classList.remove('hidden');
+
+    if (btnStudent) {
+      btnStudent.className = "px-5 py-2.5 rounded-xl font-mono text-xs font-bold transition-all text-slate-600 hover:text-slate-900 flex items-center gap-2";
+    }
+    if (btnContrib) {
+      btnContrib.className = "px-5 py-2.5 rounded-xl font-mono text-xs font-bold transition-all bg-emerald-600 text-white shadow-sm flex items-center gap-2";
+    }
+
+    if (title) title.textContent = "📸 Contributor Portal • Upload Top-View Photos & Earn ₹3";
+    if (subtitle) subtitle.textContent = "Snap and contribute a fresh top-view hall photo to help peers find seats. Earn ₹3 into your purse for every verified upload.";
+
+    renderContributorUI();
+  }
+};
+
+// Fetch State from Server
+async function fetchCommunityState() {
+  try {
+    const res = await fetch(API_BASE + '/api/community/state');
+    if (!res.ok) return;
+    const data = await res.json();
+    
+    CommunityState.locations = data.locations || [];
+    CommunityState.activeBookings = data.activeBookings || [];
+    CommunityState.totalDonations = data.totalDonations || 4250;
+
+    renderCommunityUI();
+  } catch (err) {
+    console.warn("Failed to fetch community state:", err);
+  }
+}
+
+// Render Master UI
+function renderCommunityUI() {
+  renderLocationTabs();
+  renderActiveLocationView();
+  renderDonationSection();
+  if (CommunityState.activePersona === 'contributor') {
+    renderContributorUI();
+  }
+}
+
+// Render 4 Location Tabs
+function renderLocationTabs() {
+  const container = document.getElementById('communityLocationTabs');
+  if (!container) return;
+
+  const locs = [
+    { id: 'csed', name: 'CSED Building', icon: '💻' },
+    { id: 'lib_ground', name: 'Library Ground Floor', icon: '📚' },
+    { id: 'lib_floor1', name: 'Library 1st Floor', icon: '📖' },
+    { id: 'lib_floor2', name: 'Library 2nd Floor', icon: '🤫' }
+  ];
+
+  container.innerHTML = locs.map(l => {
+    const data = CommunityState.locations.find(x => x.id === l.id);
+    const vacantCount = data ? data.empty_seats_count : 0;
+    const isSelected = CommunityState.activeLocationId === l.id;
+
+    const activeClass = isSelected
+      ? "bg-thapar-red text-white border-thapar-red shadow-md scale-102"
+      : "bg-white text-slate-700 border-slate-200 hover:border-slate-300 hover:bg-slate-50";
+
+    const badgeClass = isSelected
+      ? "bg-white/20 text-white"
+      : (vacantCount > 0 ? "bg-emerald-100 text-emerald-800" : "bg-slate-100 text-slate-500");
+
+    return `
+      <button onclick="selectCommunityLocation('${l.id}')" class="p-3.5 rounded-2xl border text-left transition-all flex flex-col justify-between gap-2 ${activeClass}">
+        <div class="flex items-center justify-between">
+          <span class="text-base">${l.icon}</span>
+          <span class="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full ${badgeClass}">
+            ${vacantCount > 0 ? `${vacantCount} Vacant` : 'No Live Photo'}
+          </span>
+        </div>
+        <div>
+          <span class="text-xs font-mono font-bold block leading-tight">${l.name}</span>
+          <span class="text-[10px] opacity-75 font-mono">Top-View Neural Grid</span>
+        </div>
+      </button>
+    `;
+  }).join('');
+}
+
+window.selectCommunityLocation = function(locId) {
+  CommunityState.activeLocationId = locId;
+  renderLocationTabs();
+  renderActiveLocationView();
+  if (CommunityState.activePersona === 'contributor') {
+    renderContributorUI();
+  }
+};
+
+// Render Active Location for Students
+function renderActiveLocationView() {
+  const loc = CommunityState.locations.find(l => l.id === CommunityState.activeLocationId);
+  const titleEl = document.getElementById('activeLocTitle');
+  const countEl = document.getElementById('activeLocVacantCount');
+  const metaEl = document.getElementById('activeLocMeta');
+  const emptyStateEl = document.getElementById('activeLocEmptyState');
+  const liveContentEl = document.getElementById('activeLocLiveContent');
+  const cooldownEl = document.getElementById('activeLocCooldownBanner');
+
+  if (!loc) return;
+
+  if (titleEl) titleEl.textContent = loc.name;
+  if (countEl) countEl.textContent = loc.empty_seats_count || 0;
+
+  // Metadata
+  if (metaEl) {
+    if (loc.last_updated_at > 0 && loc.contributor_name) {
+      const minsAgo = Math.max(1, Math.round((Date.now() - loc.last_updated_at) / 60000));
+      metaEl.innerHTML = `Photo contributed by <strong class="text-slate-700">${loc.contributor_name}</strong> (${loc.contributor_roll}) &bull; ${minsAgo}m ago`;
+    } else {
+      metaEl.textContent = "Awaiting first top-view photo upload from community contributor";
+    }
+  }
+
+  // Cooldown status
+  if (cooldownEl) {
+    if (loc.isCooldownActive) {
+      const mins = Math.ceil(loc.cooldownSecondsLeft / 60);
+      cooldownEl.innerHTML = `
+        <span class="w-2 h-2 rounded-full bg-amber-500 animate-ping mr-1.5"></span>
+        <span>Cooldown active: Next community photo update opens in <strong>${mins}m</strong> (Photos update in 10-min windows)</span>
+      `;
+      cooldownEl.classList.remove('hidden');
+    } else {
+      cooldownEl.classList.add('hidden');
+    }
+  }
+
+  // No image state
+  if (!loc.last_image || !loc.seats || loc.seats.length === 0) {
+    if (emptyStateEl) emptyStateEl.classList.remove('hidden');
+    if (liveContentEl) liveContentEl.classList.add('hidden');
+    return;
+  }
+
+  // Live content display
+  if (emptyStateEl) emptyStateEl.classList.add('hidden');
+  if (liveContentEl) liveContentEl.classList.remove('hidden');
+
+  // Render Canvas with numbered boxes
+  drawTopViewCanvas(loc);
+
+  // Render clickable seat cards
+  renderSeatBookingGrid(loc);
+}
+
+// Draw Top View Image with Numbered Empty Seat Boxes
+function drawTopViewCanvas(loc) {
+  const canvas = document.getElementById('topViewCanvas');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+
+  const img = new Image();
+  img.onload = () => {
+    canvas.width = 640;
+    canvas.height = 640;
+
+    // Draw base image
+    ctx.drawImage(img, 0, 0, 640, 640);
+
+    const scaleX = 640 / (img.naturalWidth || 640);
+    const scaleY = 640 / (img.naturalHeight || 640);
+
+    // Overlay seats
+    (loc.seats || []).forEach((seat) => {
+      const box = seat.box.map((v, i) => Math.round(v * (i % 2 === 0 ? scaleX : scaleY)));
+      const [x1, y1, x2, y2] = box;
+      const w = x2 - x1;
+      const h = y2 - y1;
+
+      const isBooked = seat.status === 'BOOKED';
+
+      // Box outline
+      ctx.lineWidth = 2.5;
+      ctx.strokeStyle = isBooked ? '#f59e0b' : '#10b981';
+      ctx.strokeRect(x1, y1, w, h);
+
+      // Box tint
+      ctx.fillStyle = isBooked ? 'rgba(245, 158, 11, 0.22)' : 'rgba(16, 185, 129, 0.20)';
+      ctx.fillRect(x1, y1, w, h);
+
+      // Seat Badge Pill
+      const label = isBooked ? `${seat.id} [BOOKED]` : `${seat.id} [VACANT]`;
+      ctx.font = 'bold 12px "Space Grotesk", monospace';
+      const textMetrics = ctx.measureText(label);
+      const badgeW = textMetrics.width + 12;
+      const badgeH = 20;
+      const badgeX = Math.max(0, x1);
+      const badgeY = Math.max(0, y1 - badgeH - 3);
+
+      ctx.fillStyle = isBooked ? '#b45309' : '#047857';
+      ctx.fillRect(badgeX, badgeY, badgeW, badgeH);
+
+      ctx.fillStyle = '#ffffff';
+      ctx.fillText(label, badgeX + 6, badgeY + 14);
+    });
+  };
+  img.src = loc.last_image;
+}
+
+// Render Seat Grid for Booking
+function renderSeatBookingGrid(loc) {
+  const container = document.getElementById('seatCardsGrid');
+  if (!container) return;
+
+  const seats = loc.seats || [];
+  if (seats.length === 0) {
+    container.innerHTML = '<p class="text-xs text-slate-400 font-mono">No seats identified in image.</p>';
+    return;
+  }
+
+  container.innerHTML = seats.map(s => {
+    const isBooked = s.status === 'BOOKED';
+
+    if (isBooked) {
+      return `
+        <div class="p-3 rounded-xl border border-amber-300 bg-amber-50/60 flex flex-col justify-between gap-1.5 opacity-80">
+          <div class="flex items-center justify-between">
+            <span class="text-xs font-mono font-bold text-amber-900">${s.id}</span>
+            <span class="text-[9px] font-mono px-1.5 py-0.5 bg-amber-200 text-amber-900 rounded font-bold">RESERVED</span>
+          </div>
+          <span class="text-[11px] text-amber-700 font-mono">Booked (10m grace)</span>
+          <button disabled class="w-full mt-1 py-1 text-[11px] font-mono bg-slate-200 text-slate-500 rounded-lg cursor-not-allowed">
+            Occupied
+          </button>
+        </div>
+      `;
+    }
+
+    return `
+      <div class="p-3 rounded-xl border border-emerald-300 bg-emerald-50/60 hover:bg-emerald-50 transition-all flex flex-col justify-between gap-1.5 shadow-sm">
+        <div class="flex items-center justify-between">
+          <span class="text-xs font-mono font-bold text-emerald-900">${s.id}</span>
+          <span class="text-[9px] font-mono px-1.5 py-0.5 bg-emerald-200 text-emerald-800 rounded font-bold">VACANT</span>
+        </div>
+        <span class="text-[11px] text-emerald-700 font-mono">Model Verified (640px)</span>
+        <button onclick="openBookingModal('${loc.id}', '${s.id}')" class="w-full mt-1 py-1.5 text-xs font-mono font-bold bg-thapar-red hover:bg-thapar-darkRed text-white rounded-lg transition-all shadow-sm">
+          Reserve Desk
+        </button>
+      </div>
+    `;
+  }).join('');
+}
+
+// Booking Modal Logic
+window.openBookingModal = function(locId, seatId) {
+  CommunityState.selectedSeatForBooking = { locId, seatId };
+  const loc = CommunityState.locations.find(l => l.id === locId);
+  
+  document.getElementById('modalBookingSeatLabel').textContent = `${seatId} &bull; ${loc ? loc.name : locId.toUpperCase()}`;
+  document.getElementById('communityBookingModal').classList.remove('hidden');
+  document.body.style.overflow = 'hidden';
+};
+
+window.closeBookingModal = function() {
+  document.getElementById('communityBookingModal').classList.add('hidden');
+  document.body.style.overflow = '';
+};
+
+window.confirmCommunityBooking = async function() {
+  const roll = document.getElementById('bookRollInput').value.trim();
+  const email = document.getElementById('bookEmailInput').value.trim().toLowerCase();
+
+  if (!roll || !email) {
+    showToast("Missing Details", "Please enter your Roll Number and @thapar.edu Email.", "error");
+    return;
+  }
+  if (!email.endsWith('@thapar.edu')) {
+    showToast("Invalid Email", "Only official @thapar.edu email addresses can reserve.", "error");
+    return;
+  }
+
+  const { locId, seatId } = CommunityState.selectedSeatForBooking || {};
+  if (!locId || !seatId) return;
+
+  const btn = document.getElementById('btnConfirmBooking');
+  btn.disabled = true;
+  btn.textContent = "Confirming...";
+
+  try {
+    const res = await fetch(API_BASE + '/api/community/book', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        locationId: locId,
+        seatNumber: seatId,
+        studentRoll: roll,
+        studentEmail: email
+      })
+    });
+
+    const data = await res.json();
+    if (!res.ok || data.error) {
+      showToast("Booking Failed", data.error || "Unable to reserve seat.", "error");
+      return;
+    }
+
+    closeBookingModal();
+    showToast("Seat Reserved!", `You have booked ${seatId} for 10 minutes. Arrive and occupy!`, "success");
+    await fetchCommunityState();
+  } catch (err) {
+    showToast("Network Error", err.message, "error");
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Confirm 10-Minute Reservation";
+  }
+};
+
+// ============================================================================
+// CONTRIBUTOR FLOW (Earn Rs 3 per Upload)
+// ============================================================================
+
+function renderContributorUI() {
+  const authSection = document.getElementById('contribAuthSection');
+  const dashSection = document.getElementById('contribDashboardSection');
+
+  if (!CommunityState.contributor) {
+    if (authSection) authSection.classList.remove('hidden');
+    if (dashSection) dashSection.classList.add('hidden');
+    return;
+  }
+
+  if (authSection) authSection.classList.add('hidden');
+  if (dashSection) dashSection.classList.remove('hidden');
+
+  const c = CommunityState.contributor;
+  const nameEl = document.getElementById('contribNameDisplay');
+  const rollEl = document.getElementById('contribRollDisplay');
+  const walletEl = document.getElementById('contribWalletBalance');
+  const countEl = document.getElementById('contribTotalCount');
+
+  if (nameEl) nameEl.textContent = c.name;
+  if (rollEl) rollEl.textContent = c.roll_number;
+  if (walletEl) walletEl.textContent = `₹${(c.wallet_balance || 0).toFixed(2)}`;
+  if (countEl) countEl.textContent = `${c.total_contributions || 0} Uploads`;
+
+  // Render upload controls for active location
+  renderContributorUploadBox();
+}
+
+window.loginContributor = async function() {
+  const name = document.getElementById('contribInputName').value.trim();
+  const roll = document.getElementById('contribInputRoll').value.trim();
+  const email = document.getElementById('contribInputEmail').value.trim().toLowerCase();
+
+  if (!roll || !email) {
+    showToast("Missing Details", "Please provide your Roll Number and @thapar.edu email.", "error");
+    return;
+  }
+  if (!email.endsWith('@thapar.edu')) {
+    showToast("Invalid Email", "Please enter your official @thapar.edu address.", "error");
+    return;
+  }
+
+  try {
+    const res = await fetch(API_BASE + '/api/community/contributor/auth', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, roll, email })
+    });
+    const data = await res.json();
+    if (!res.ok || data.error) {
+      showToast("Sign In Failed", data.error || "Authentication error.", "error");
+      return;
+    }
+
+    CommunityState.contributor = data.contributor;
+    localStorage.setItem('thapar_contributor_user', JSON.stringify(data.contributor));
+    showToast("Purse Ready!", `Welcome, ${data.contributor.name}! ₹${data.contributor.wallet_balance} in your purse.`, "success");
+    renderContributorUI();
+  } catch (err) {
+    showToast("Network Error", err.message, "error");
+  }
+};
+
+window.logoutContributor = function() {
+  CommunityState.contributor = null;
+  localStorage.removeItem('thapar_contributor_user');
+  renderContributorUI();
+};
+
+function renderContributorUploadBox() {
+  const loc = CommunityState.locations.find(l => l.id === CommunityState.activeLocationId);
+  const lockEl = document.getElementById('contribCooldownLockBox');
+  const formEl = document.getElementById('contribUploadForm');
+  const lockTimerEl = document.getElementById('contribLockTimerText');
+  const locNameEl = document.getElementById('contribUploadLocName');
+
+  if (!loc) return;
+  if (locNameEl) locNameEl.textContent = loc.name;
+
+  if (loc.isCooldownActive) {
+    if (lockEl) lockEl.classList.remove('hidden');
+    if (formEl) formEl.classList.add('hidden');
+    const mins = Math.ceil(loc.cooldownSecondsLeft / 60);
+    if (lockTimerEl) lockTimerEl.textContent = `${mins} minute(s) remaining until next contribution opens`;
+  } else {
+    if (lockEl) lockEl.classList.add('hidden');
+    if (formEl) formEl.classList.remove('hidden');
+  }
+}
+
+let activeUploadBase64 = null;
+
+function setupCommunityUpload() {
+  const input = document.getElementById('communityFileInput');
+  const dropZone = document.getElementById('communityDropZone');
+  const previewImg = document.getElementById('communityImagePreview');
+  const submitBtn = document.getElementById('btnSubmitContribution');
+
+  if (input) {
+    input.addEventListener('change', (e) => {
+      if (e.target.files && e.target.files[0]) {
+        handleFileSelect(e.target.files[0]);
+      }
+    });
+  }
+
+  function handleFileSelect(file) {
+    if (!file.type.startsWith('image/')) {
+      alert("Please upload an image file (.jpg, .png, .webp)");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      activeUploadBase64 = e.target.result;
+      if (previewImg) {
+        previewImg.src = activeUploadBase64;
+        previewImg.classList.remove('hidden');
+      }
+      if (submitBtn) submitBtn.disabled = false;
+    };
+    reader.readAsDataURL(file);
+  }
+}
+
+window.submitTopViewContribution = async function() {
+  if (!activeUploadBase64) {
+    showToast("No Image Selected", "Please select or drop a top-view photo first.", "error");
+    return;
+  }
+  if (!CommunityState.contributor) {
+    showToast("Please Sign In", "Sign into your contributor purse first.", "error");
+    return;
+  }
+
+  const btn = document.getElementById('btnSubmitContribution');
+  btn.disabled = true;
+  btn.textContent = "⚡ Running best.pt Model & Numbering Seats...";
+
+  try {
+    const res = await fetch(API_BASE + '/api/community/contribute', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        locationId: CommunityState.activeLocationId,
+        imageBase64: activeUploadBase64,
+        rollNumber: CommunityState.contributor.roll_number,
+        name: CommunityState.contributor.name
+      })
+    });
+
+    const data = await res.json();
+    if (!res.ok || data.error) {
+      showToast("Upload Blocked", data.error || "Contribution failed.", "error");
+      return;
+    }
+
+    // Update local contributor wallet
+    CommunityState.contributor.wallet_balance = (CommunityState.contributor.wallet_balance || 0) + 3.0;
+    CommunityState.contributor.total_contributions = (CommunityState.contributor.total_contributions || 0) + 1;
+    localStorage.setItem('thapar_contributor_user', JSON.stringify(CommunityState.contributor));
+
+    showToast("🎉 ₹3.00 Credited to Your Purse!", `Identified ${data.emptySeatsCount} empty seats. 10-minute cooldown active for this zone!`, "success");
+
+    // Reset upload input
+    activeUploadBase64 = null;
+    const previewImg = document.getElementById('communityImagePreview');
+    if (previewImg) previewImg.classList.add('hidden');
+
+    await fetchCommunityState();
+    renderContributorUI();
+  } catch (err) {
+    showToast("Network Error", err.message, "error");
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "🚀 Process With Model & Claim ₹3 Reward";
+  }
+};
+
+// ============================================================================
+// DONATIONS SECTION
+// ============================================================================
+
+function renderDonationSection() {
+  const total = CommunityState.totalDonations || 4250;
+  const goal = 10000;
+  const pct = Math.min(100, Math.round((total / goal) * 100));
+
+  const totalEl = document.getElementById('donationTotalText');
+  const barEl = document.getElementById('donationProgressBar');
+  const pctEl = document.getElementById('donationPctText');
+
+  if (totalEl) totalEl.textContent = `₹${total.toLocaleString('en-IN')}`;
+  if (barEl) barEl.style.width = `${pct}%`;
+  if (pctEl) pctEl.textContent = `${pct}% Funded`;
+}
+
+window.openDonationModal = function() {
+  document.getElementById('donationModal').classList.remove('hidden');
+  document.body.style.overflow = 'hidden';
+};
+
+window.closeDonationModal = function() {
+  document.getElementById('donationModal').classList.add('hidden');
+  document.body.style.overflow = '';
+};
+
+window.selectDonationPreset = function(amt) {
+  document.getElementById('customDonationInput').value = amt;
+};
+
+window.confirmCommunityDonation = async function() {
+  const name = document.getElementById('donorNameInput').value.trim() || 'Generous Thaparian';
+  const amt = parseFloat(document.getElementById('customDonationInput').value) || 50;
+
+  try {
+    const res = await fetch(API_BASE + '/api/community/donate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ donorName: name, amount: amt })
+    });
+    const data = await res.json();
+    if (res.ok) {
+      CommunityState.totalDonations = data.totalDonations;
+      renderDonationSection();
+      closeDonationModal();
+      showToast("Thank You!", `Thank you ${name} for supporting Thapar seat visibility infrastructure!`, "success");
+    }
+  } catch (err) {
+    showToast("Donation Error", err.message, "error");
+  }
+};
+
+// Global Floating Toast Notification
+function showToast(title, body, type = "info") {
+  const toast = document.createElement("div");
+  toast.className = "fixed bottom-6 right-6 z-50 p-4 rounded-2xl backdrop-blur-md border border-slate-700 shadow-2xl transition-all duration-300 transform translate-y-2 opacity-0 flex items-start gap-3 bg-slate-900 text-white font-mono text-xs max-w-sm";
+  
+  const icon = type === 'success' ? '✓' : (type === 'error' ? '⚠️' : 'ℹ️');
+  const iconColor = type === 'success' ? 'text-emerald-400' : (type === 'error' ? 'text-rose-400' : 'text-blue-400');
+
+  toast.innerHTML = `
+    <span class="text-base ${iconColor} font-bold">${icon}</span>
+    <div class="flex-grow">
+      <p class="font-bold tracking-tight text-white">${title}</p>
+      <p class="text-[11px] text-slate-300 mt-0.5 leading-relaxed">${body}</p>
+    </div>
+  `;
+  document.body.appendChild(toast);
+  setTimeout(() => toast.classList.remove("translate-y-2", "opacity-0"), 50);
+  setTimeout(() => {
+    toast.classList.add("opacity-0", "translate-y-2");
+    setTimeout(() => toast.remove(), 400);
+  }, 4500);
+}

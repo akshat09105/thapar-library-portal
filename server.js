@@ -555,6 +555,167 @@ app.post('/api/ai/detect-seats', (req, res) => {
   });
 });
 
+
+// ============================================================================
+// 12. Crowdsourced Community Vision, Bounties, & Allocation Endpoints
+// ============================================================================
+
+// 12a. GET /api/community/state: Fetch all 4 locations, cooldowns, and donations
+app.get('/api/community/state', (req, res) => {
+  try {
+    const state = db.getCommunityState();
+    res.json(state);
+  } catch (err) {
+    console.error("Community state error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 12b. POST /api/community/contributor/auth: Contributor signup / login & wallet fetch
+app.post('/api/community/contributor/auth', (req, res) => {
+  try {
+    const { name, roll, email } = req.body;
+    if (!roll || !email) {
+      return res.status(400).json({ error: "Roll number and @thapar.edu email are required." });
+    }
+    const cleanEmail = email.trim().toLowerCase();
+    if (!cleanEmail.endsWith('@thapar.edu')) {
+      return res.status(400).json({ error: "Please enter a valid @thapar.edu email address." });
+    }
+    const contributor = db.authContributor(name, roll, cleanEmail);
+    res.json({ success: true, contributor });
+  } catch (err) {
+    console.error("Contributor auth error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 12c. POST /api/community/contribute: Contributor uploads top-view photo, model numbers empty seats, earns Rs 3
+app.post('/api/community/contribute', async (req, res) => {
+  try {
+    const { locationId, imageBase64, rollNumber, name } = req.body;
+    if (!locationId || !imageBase64 || !rollNumber) {
+      return res.status(400).json({ error: "Location, image data, and contributor roll number are required." });
+    }
+
+    // Check cooldown for this location
+    const state = db.getCommunityState();
+    const loc = state.locations.find(l => l.id === locationId);
+    if (!loc) {
+      return res.status(400).json({ error: "Invalid location selected." });
+    }
+
+    if (loc.isCooldownActive) {
+      const mins = Math.ceil(loc.cooldownSecondsLeft / 60);
+      return res.status(429).json({ 
+        error: `Cooldown active: A photo was contributed recently for ${loc.name}. Next upload opens in ${mins} minute(s).`,
+        cooldownSecondsLeft: loc.cooldownSecondsLeft
+      });
+    }
+
+    // Run AI detection on image via best.pt
+    let detectedSeats = [];
+    let emptyCount = 0;
+
+    const base64Data = imageBase64.replace(/^data:image\/\w+;base64,/, "");
+    const tempDir = path.join(os.tmpdir(), 'thapar_temp_vision');
+    if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
+    const tempFile = path.join(tempDir, `contrib_${Date.now()}_${Math.random().toString(36).substring(7)}.jpg`);
+    fs.writeFileSync(tempFile, Buffer.from(base64Data, 'base64'));
+
+    try {
+      const pyScript = path.join(__dirname, 'count_empty_seats.py');
+      const pythonExe = process.platform === 'win32' ? 'python' : 'python3';
+      
+      const { spawnSync } = require('child_process');
+      const pyRun = spawnSync(pythonExe, [pyScript, '--image', tempFile, '--json'], { encoding: 'utf-8', timeout: 30000 });
+      
+      if (pyRun.status === 0 && pyRun.stdout) {
+        const parsed = JSON.parse(pyRun.stdout.trim());
+        if (parsed.success && parsed.boxes) {
+          detectedSeats = parsed.boxes.map((b, i) => ({
+            id: `Seat #${i + 1}`,
+            box: b.box,
+            confidence: b.confidence,
+            status: 'VACANT'
+          }));
+          emptyCount = detectedSeats.length;
+        }
+      }
+    } catch (pyErr) {
+      console.warn("Python best.pt execution notice:", pyErr.message);
+    } finally {
+      try { if (fs.existsSync(tempFile)) fs.unlinkSync(tempFile); } catch (_) {}
+    }
+
+    // Client fallback if running in serverless without python
+    if (detectedSeats.length === 0 && req.body.clientSeats && Array.isArray(req.body.clientSeats) && req.body.clientSeats.length > 0) {
+      detectedSeats = req.body.clientSeats.map((b, i) => ({
+        id: `Seat #${i + 1}`,
+        box: b.box || [60 + (i % 3) * 160, 80 + Math.floor(i / 3) * 180, 180 + (i % 3) * 160, 200 + Math.floor(i / 3) * 180],
+        confidence: b.confidence || 92.5,
+        status: 'VACANT'
+      }));
+      emptyCount = detectedSeats.length;
+    }
+
+    // Save to database & reward contributor Rs 3
+    const result = db.updateCommunityLocation(locationId, {
+      imageBase64,
+      seats: detectedSeats,
+      emptySeatsCount: emptyCount,
+      contributorName: name || 'Student Contributor',
+      contributorRoll: rollNumber
+    });
+
+    res.json({
+      success: true,
+      rewardEarned: 3.0,
+      emptySeatsCount: emptyCount,
+      location: result.location,
+      contributor: result.contributor
+    });
+  } catch (err) {
+    console.error("Community contribution error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 12d. POST /api/community/book: Normal student books a specific vacant seat for 10 mins
+app.post('/api/community/book', (req, res) => {
+  try {
+    const { locationId, seatNumber, studentRoll, studentEmail } = req.body;
+    if (!locationId || !seatNumber || !studentRoll || !studentEmail) {
+      return res.status(400).json({ error: "Location, seat number, student roll number, and @thapar.edu email are required." });
+    }
+    const cleanEmail = studentEmail.trim().toLowerCase();
+    if (!cleanEmail.endsWith('@thapar.edu')) {
+      return res.status(400).json({ error: "Only official @thapar.edu student email IDs are permitted to reserve." });
+    }
+
+    const result = db.bookCommunitySeat(locationId, seatNumber, studentRoll.trim(), cleanEmail);
+    if (!result.success) {
+      return res.status(400).json({ error: result.error });
+    }
+    res.json(result);
+  } catch (err) {
+    console.error("Community booking error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 12e. POST /api/community/donate: Student/Faculty donates to keep platform and servers running
+app.post('/api/community/donate', (req, res) => {
+  try {
+    const { donorName, amount } = req.body;
+    const result = db.addCommunityDonation(donorName, amount);
+    res.json(result);
+  } catch (err) {
+    console.error("Community donation error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Background Worker: Checks timeouts and releases expired seats every 1000ms
 setInterval(() => {
   try {
